@@ -1,0 +1,18 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PC koppeln",
+        "description": "Diesen Kopplungscode in der HA Computer Control-App eingeben, bevor er abläuft:\n\n## {code}\n\nDer Code ist einmalig gültig und läuft nach wenigen Minuten ab."
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Neuen Kopplungscode erzeugen",
+        "description": "Ein zuvor angezeigter Code wird damit ungültig. Diesen neuen Code in der App eingeben:\n\n## {code}"
+      }
+    }
+  }
+}

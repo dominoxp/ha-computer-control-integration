@@ -1,0 +1,11 @@
+{
+  "domain": "hacc",
+  "name": "HA Computer Control",
+  "config_flow": true,
+  "documentation": "https://github.com/dominoxp/ha-computer-control-integration",
+  "issue_tracker": "https://github.com/dominoxp/ha-computer-control-integration/issues",
+  "dependencies": ["http"],
+  "codeowners": ["@dominoxp"],
+  "iot_class": "local_push",
+  "version": "0.1.0"
+}

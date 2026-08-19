@@ -1,0 +1,60 @@
+[project]
+name = "hacc-integration"
+version = "0.1.0"
+description = "Home-Assistant-Custom-Integration für HA Computer Control"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Jan" }]
+dependencies = []
+
+[project.optional-dependencies]
+# Referenz fuer die Werkzeuge, die check.sh in .venv-wsl installiert - siehe
+# dort. Kein Versionsboden auf pytest-homeassistant-custom-component: welche
+# Version passt, haengt an der verfuegbaren Python-Version in WSL (siehe
+# README, Abschnitt Entwicklung).
+dev = [
+    "pytest-homeassistant-custom-component",
+    "ruff>=0.4",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+src = ["."]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # import-Sortierung
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "ANN",  # fehlende Typannotationen
+    "ASYNC",
+    "C4",   # comprehensions
+    "PTH",  # pathlib statt os.path
+    "RET",
+    "RUF",
+    "SIM",
+    "TRY",  # Exception-Handling
+]
+ignore = [
+    "ANN401",  # Any ist bei Nachrichten-Payloads Absicht
+    "TRY003",  # ausformulierte Exception-Messages sind hier erwünscht
+    "TRY400",  # log.error mit explizitem Kontext ist teils gewollt
+]
+
+[tool.ruff.lint.per-file-ignores]
+# ANN201/ANN202: Testfunktionen brauchen kein -> None.
+# ASYNC110: Auf Zustände in Client und Fake-Server wird im Test bewusst gepollt.
+"tests/*" = ["ANN201", "ANN202", "ASYNC110"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+include = ["custom_components", "tests"]
+typeCheckingMode = "standard"

@@ -1,0 +1,18 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Pair a PC",
+        "description": "Enter this pairing code in the HA Computer Control app before it expires:\n\n## {code}\n\nThe code is single-use and expires after a few minutes."
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Generate a new pairing code",
+        "description": "The previous code (if any) becomes invalid. Enter this one in the app:\n\n## {code}"
+      }
+    }
+  }
+}
