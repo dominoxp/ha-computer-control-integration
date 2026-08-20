@@ -16,9 +16,11 @@ greift dann sofort, ein echtes `register` frischt Icon/Einheit/Klassen danach
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from aiohttp import WSCloseCode
@@ -33,6 +35,8 @@ from .const import (
     DATA_DEVICE_ID,
     DEVICE_MANUFACTURER,
     DOMAIN,
+    EVENT_COMMAND_RESULT,
+    EVENT_TYPE_MAP,
     SIGNAL_CONNECTION_STATE,
     SIGNAL_ENTITY_REGISTERED,
 )
@@ -42,7 +46,15 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-_KNOWN_DOMAINS = ("sensor", "binary_sensor")
+_KNOWN_DOMAINS = ("sensor", "binary_sensor", "button", "select", "number", "switch")
+
+
+class CommandOutcome(StrEnum):
+    """Ausgang eines an den PC geschickten ``command`` - siehe PROTOCOL.md."""
+
+    EXECUTED = "executed"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
 
 
 @dataclass(slots=True, frozen=True)
@@ -52,12 +64,28 @@ class RegisteredEntity:
 
     key: str
     name: str
-    domain: str  # "sensor" | "binary_sensor"
+    domain: str  # "sensor" | "binary_sensor" | "button" | "select" | "number" | "switch"
     icon: str | None
     unit: str | None
     device_class: str | None
     state_class: str | None
     attributes: dict[str, Any]
+    min_value: float | None = None
+    max_value: float | None = None
+    step: float | None = None
+    command: str | None = None
+    """Welcher command bei einer Interaktion an den PC geschickt wird - ``None``
+    heisst reine Anzeige-Entität (gilt hier praktisch nie, siehe _KNOWN_DOMAINS)."""
+    command_data: dict[str, Any] = field(default_factory=dict)
+    value_field: str = "value"
+
+
+@dataclass(slots=True)
+class PendingCommand:
+    """Ein an den PC geschickter ``command``, der noch auf ``result`` wartet."""
+
+    future: asyncio.Future[tuple[CommandOutcome, str]]
+    command: str
 
 
 @dataclass(slots=True)
@@ -85,6 +113,8 @@ class ConnectionState:
     manifest: dict[str, RegisteredEntity] = field(default_factory=dict)
     raw_states: dict[str, RawState] = field(default_factory=dict)
     live_entities: dict[str, HaccEntity] = field(default_factory=dict)
+    next_command_id: int = 0
+    pending_commands: dict[int, PendingCommand] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -215,6 +245,12 @@ def _parse_manifest(entities: list[Any]) -> dict[str, RegisteredEntity]:
             device_class=entry.get("device_class"),
             state_class=entry.get("state_class"),
             attributes=dict(entry.get("attributes") or {}),
+            min_value=entry.get("min"),
+            max_value=entry.get("max"),
+            step=entry.get("step"),
+            command=entry.get("command"),
+            command_data=dict(entry.get("command_data") or {}),
+            value_field=str(entry.get("value_field") or "value"),
         )
     return parsed
 
@@ -281,3 +317,74 @@ def async_apply_state(hass: HomeAssistant, entry_id: str, states: list[Any]) -> 
         live = state.live_entities.get(key)
         if live is not None:
             live.async_apply_state(value, attributes)
+
+
+def async_fire_command_result(
+    hass: HomeAssistant, entry_id: str, command: str, outcome: CommandOutcome, reason: str = ""
+) -> None:
+    """`hacc_command_result` feuern - der eine Ort, der das tut.
+
+    Läuft sowohl für ein echtes `result` vom PC (:func:`async_apply_command_result`)
+    als auch für einen lokalen Timeout (:func:`hacc.commands.async_send_command`),
+    damit eine Automation den Ausgang so oder so sieht.
+    """
+    state = get_connection_state(hass, entry_id)
+    hass.bus.async_fire(
+        EVENT_COMMAND_RESULT,
+        {
+            "device_id": state.device_id,
+            "command": command,
+            "result": outcome.value,
+            "reason": reason,
+        },
+    )
+
+
+def async_apply_command_result(
+    hass: HomeAssistant, entry: ConfigEntry, payload: dict[str, Any]
+) -> None:
+    """result-Nachricht auf einen command verarbeiten: die wartende Future lösen
+    (falls noch jemand wartet) und immer `hacc_command_result` feuern - auch
+    wenn der Aufrufer inzwischen in einen Timeout gelaufen ist, soll eine
+    Automation die Wahrheit sehen."""
+    state = get_connection_state(hass, entry.entry_id)
+    command_id = payload.get("id")
+    success = bool(payload.get("success", False))
+    error = payload.get("error")
+    code = ""
+    message = ""
+    if isinstance(error, dict):
+        code = str(error.get("code") or "")
+        message = str(error.get("message") or "")
+
+    if success:
+        outcome = CommandOutcome.EXECUTED
+    elif code == "cancelled":
+        outcome = CommandOutcome.CANCELLED
+    else:
+        outcome = CommandOutcome.FAILED
+    reason = message or code
+
+    pending = state.pending_commands.pop(command_id, None) if isinstance(command_id, int) else None
+    command_name = pending.command if pending is not None else ""
+    if pending is not None and not pending.future.done():
+        pending.future.set_result((outcome, reason))
+
+    async_fire_command_result(hass, entry.entry_id, command_name, outcome, reason)
+
+
+def async_apply_event(hass: HomeAssistant, entry: ConfigEntry, payload: dict[str, Any]) -> None:
+    """event-Nachricht verarbeiten: bekannte event_type-Werte als HA-Event feuern.
+
+    Unbekannte Werte werden geloggt und ignoriert - Vorwärtskompatibilität, wie
+    bei register/state schon üblich."""
+    state = get_connection_state(hass, entry.entry_id)
+    event_type = str(payload.get("event_type") or "")
+    mapped = EVENT_TYPE_MAP.get(event_type)
+    if mapped is None:
+        _LOGGER.debug("event: unbekannter event_type %r - ignoriert", event_type)
+        return
+    data = payload.get("data")
+    hass.bus.async_fire(
+        mapped, {"device_id": state.device_id, **(data if isinstance(data, dict) else {})}
+    )

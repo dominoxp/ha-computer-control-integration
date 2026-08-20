@@ -13,7 +13,14 @@ DOMAIN = "hacc"
 # (siehe PROTOCOL.md) - inkompatibel zum bisherigen Format.
 PROTOCOL_VERSION = 2
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.SENSOR,
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.SELECT,
+    Platform.NUMBER,
+    Platform.SWITCH,
+]
 
 DEVICE_MANUFACTURER = "HA Computer Control"
 
@@ -24,6 +31,26 @@ SIGNAL_ENTITY_REGISTERED = "hacc_entity_registered_{}"
 # .format(entry_id). Kein Payload - stößt nur async_write_ha_state() an, damit
 # `available` (liest ConnectionState.connected live) neu ausgewertet wird.
 SIGNAL_CONNECTION_STATE = "hacc_connection_state_{}"
+
+# Auf hass.bus gefeuerte Events (Step 5.4) - device_id ist bei allen dabei.
+EVENT_COMMAND_RESULT = "hacc_command_result"
+EVENT_NOTIFICATION = "hacc_notification"
+EVENT_NOTIFICATION_ACTION = "hacc_notification_action"
+
+# Wire-event_type -> HA-Event (siehe PROTOCOL.md, Abschnitt "event").
+EVENT_TYPE_MAP = {
+    "pc_notification": EVENT_NOTIFICATION,
+    "pc_notification_action": EVENT_NOTIFICATION_ACTION,
+}
+
+# Services, ein PC-Befehl pro Service statt eines generischen Notausgangs -
+# bessere UX im Web-Editor (echte Felder statt einem freien data-Objekt).
+SERVICE_NOTIFY = "notify"
+SERVICE_LAUNCH = "launch"
+SERVICE_SET_DISPLAYS = "set_displays"
+
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 30.0
+ATTR_DEVICE_ID = "device_id"
 
 # Kopplungscode: kurz und abtippbar, aber ohne leicht verwechselbare Zeichen.
 PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"  # ohne 0/O/1/I/L

@@ -34,13 +34,13 @@ passende Änderung in beiden Repos nach sich.
 | HA → PC  | `error`        | Ablehnung mit `code` und `message`                   | lebt seit 5.1 |
 | PC → HA  | `register`     | vollständiges Manifest der eigenen Entitäten         | lebt seit 5.3 |
 | PC → HA  | `state`        | Zustandsänderungen (Sammelnachricht möglich)         | lebt seit 5.3 |
-| PC → HA  | `event`        | Meldungen an HA (Notification, Aktion)               | wird seit 5.2 gesendet, HA wertet noch nicht aus (5.3+) |
+| PC → HA  | `event`        | Meldungen an HA (Notification, Aktion)               | lebt seit 5.4 (HA wertet `pc_notification`/`pc_notification_action` aus) |
 | PC → HA  | `call_service` | Service-Aufruf mit Antwort                           | Client sendet seit 5.2, HA antwortet erst ab 5.5 (bis dahin Timeout) |
-| HA → PC  | `result`       | Ausgang eines Befehls oder `call_service`-Aufrufs    | spezifiziert, noch nicht gesendet (5.4/5.5) |
+| HA → PC  | `command`      | auszuführender Befehl mit Korrelations-Id             | lebt seit 5.4 |
+| PC → HA  | `result`       | Ausgang eines Befehls (`command`) oder `call_service`-Aufrufs | für `command` lebt seit 5.4; für `call_service` antwortet HA erst ab 5.5 |
 | PC → HA  | `subscribe`    | gewünschte HA-Entitäten                              | spezifiziert, noch nicht implementiert (5.5) |
 | HA → PC  | `entity`       | Zustand einer abonnierten HA-Entität                 | spezifiziert, noch nicht implementiert (5.5) |
 | PC → HA  | `catalog`      | verfügbare Entitäten/Services zur Auswahl            | spezifiziert, noch nicht implementiert (5.5) |
-| HA → PC  | `command`      | auszuführender Befehl mit Korrelations-Id             | spezifiziert, noch nicht implementiert (5.4) |
 | HA → PC  | `access`       | aktueller Stand der Freigaben                        | spezifiziert, noch nicht implementiert (5.5) |
 
 ## Payloads
@@ -100,11 +100,32 @@ echten HA-Entity-Eigenschaften - sie reisen deshalb nur hier, nicht mehr über
       "unit": null,
       "device_class": null,
       "state_class": null,
-      "attributes": {}
+      "attributes": {},
+      "min": null,
+      "max": null,
+      "step": null,
+      "command": null,
+      "command_data": {},
+      "value_field": "value"
     }
   ]
 }
 ```
+
+Seit Step 5.4 kennt `domain` neben `sensor`/`binary_sensor` auch `button`,
+`select`, `number` und `switch` - die "Art" einer Entität ist einfach ihre HA-
+Plattform, kein eigenes Feld. Die sechs neuen Felder gelten nur für diese vier
+bedienbaren Domains: `min`/`max`/`step` beschreiben den Wertebereich eines
+`number`-Reglers; `command` nennt den Wire-Befehl (siehe unten), den eine
+Interaktion (Knopfdruck, Auswahl, Regler, Schalter) auslöst - `null` heisst
+reine Anzeige-Entität; `command_data` sind feste Zusatzfelder, die jede
+Interaktion mitschickt (z.B. `{"direction": "output"}`, um zwischen Audio-
+Ausgabe und -Eingabe zu unterscheiden); `value_field` nennt das Datenfeld, unter
+dem der vom Nutzer gewählte Wert im `command` landet (`device` bei `set_audio`,
+`level` bei `set_volume`, `mute` bei `set_mute`, `profile` bei `set_displays`).
+Bei `select` reisen die wählbaren Optionen **nicht** über `register` (sie
+ändern sich zur Laufzeit), sondern als dynamisches `state`-Attribut
+`options` (siehe unten).
 
 HA legt daraus ein Gerät je PC an (`identifiers = (DOMAIN, device_id)`,
 Hersteller/Modell/Software-Version aus `hello`) und pro Eintrag eine Entität mit
@@ -136,11 +157,43 @@ echte Laufzeitwerte (z.B. `pid` einer laufenden App), keine der Basisfelder aus
 }
 ```
 
+Für eine `select`-Entität steht die aktuell wählbare Optionsliste unter dem
+Attribut-Schlüssel `options` (z.B. `{"options": ["Kopfhörer", "Monitor"]}`) -
+dynamisch statt in `register`, weil sich z.B. angeschlossene Audiogeräte oder
+gespeicherte Monitor-Profile zur Laufzeit ändern.
+
 ### `event` (PC → HA)
 
 ```json
 { "type": "event", "event_type": "pc_notification", "data": { "title": "Download fertig" } }
 ```
+
+HA übersetzt bekannte `event_type`-Werte 1:1 in eigene Events auf `hass.bus`,
+mit `device_id` ergänzt: `pc_notification` → `hacc_notification`,
+`pc_notification_action` → `hacc_notification_action`. Unbekannte
+`event_type`-Werte werden geloggt und ignoriert (Vorwärtskompatibilität, wie
+bei `register`/`state`).
+
+### `command` (HA → PC) / `result` (PC → HA)
+
+Ausgelöst durch eine Interaktion mit einer bedienbaren Entität (`button`
+gedrückt, `select`/`number`/`switch` geändert) oder durch einen der
+zweckgebundenen Services (`hacc.notify`, `hacc.launch`, `hacc.set_displays`).
+
+```json
+{ "type": "command", "id": 12, "command": "set_volume", "data": { "direction": "output", "level": 30 } }
+```
+
+```json
+{ "type": "result", "id": 12, "success": true, "error": null }
+```
+
+Bei Ablehnung: `"success": false, "error": { "code": "cancelled" | "failed" | "<reason>", "message": "..." }`.
+`error.code` ist entweder `cancelled` (Nutzer hat das Countdown-Popup
+abgebrochen) oder der eigentliche Fehlergrund - beides wird von der Integration
+zu `hacc_command_result` (`result: executed | cancelled | failed`, `reason`)
+zusammengefasst und auf `hass.bus` gefeuert, unabhängig davon, ob noch ein
+Aufrufer (Entität oder Service) darauf wartet.
 
 ### `call_service` (PC → HA) / `result` (HA → PC)
 
@@ -153,8 +206,9 @@ echte Laufzeitwerte (z.B. `pid` einer laufenden App), keine der Basisfelder aus
 ```
 
 Bei Ablehnung: `"success": false, "error": { "code": "...", "message": "..." }`.
-Dieselbe Form ist für die spätere `command`/`result`-Korrelation (Step 5.4)
-vorgesehen - eine Nachricht mit `id`, eine Antwort mit derselben `id`.
+Dieselbe Form wie beim `command`/`result` oben - eine Nachricht mit `id`, eine
+Antwort mit derselben `id`, in dieser Richtung aber PC-initiiert statt
+HA-initiiert.
 
 ## Fehlerbehandlung
 

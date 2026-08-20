@@ -202,7 +202,7 @@ class WebSocketView(HomeAssistantView):
                         entry.entry_id,
                         ws.exception(),
                     )
-                # command/event/call_service (Step 5.4/5.5) kommen hier noch nicht an.
+                # call_service (Step 5.5) kommt hier noch nicht an.
         finally:
             if get_connection_state(hass, entry.entry_id).ws is ws:
                 clear_connection(hass, entry.entry_id)
@@ -229,8 +229,12 @@ class WebSocketView(HomeAssistantView):
             )
         elif kind == "state":
             conn.async_apply_state(hass, entry.entry_id, payload.get("states") or [])
-        # event/call_service (Step 5.4/5.5) sind hier noch kein Sonderfall - unbekannte
-        # Typen werden bewusst stillschweigend ignoriert.
+        elif kind == "result":
+            conn.async_apply_command_result(hass, entry, payload)
+        elif kind == "event":
+            conn.async_apply_event(hass, entry, payload)
+        # call_service (Step 5.5) ist hier noch kein Sonderfall - unbekannte Typen
+        # werden bewusst stillschweigend ignoriert.
 
     @staticmethod
     def _find_entry_for_device(hass: HomeAssistant, device_id: str) -> ConfigEntry | None:

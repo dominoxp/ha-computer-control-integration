@@ -8,10 +8,12 @@ from enum import Enum
 from typing import Any
 
 from homeassistant.core import callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, Entity
 
-from .connection import RegisteredEntity, get_connection_state
+from . import commands
+from .connection import CommandOutcome, RegisteredEntity, get_connection_state
 from .const import DOMAIN, SIGNAL_CONNECTION_STATE
 
 _LOGGER = logging.getLogger(__name__)
@@ -105,6 +107,24 @@ class HaccEntity(Entity):
     def async_apply_state(self, value: str, attributes: dict[str, Any]) -> None:
         self._apply_raw_state(value, attributes)
         self.async_write_ha_state()
+
+    async def async_send_command(self, data: dict[str, Any]) -> None:
+        """Eine Interaktion (Knopfdruck, Auswahl, Regler, Schalter) an den PC schicken.
+
+        Mergt die festen `command_data` des Deskriptors mit den variablen Daten
+        dieser einen Interaktion und wirft bei einem Misserfolg - HA zeigt das
+        dann als gescheiterte Entity-Aktion an, statt es stillschweigend zu
+        verschlucken. Die Wahrheit über den neuen Zustand kommt trotzdem nur
+        über die nächste `state`-Nachricht vom PC (siehe Step-Hinweis).
+        """
+        descriptor = self._descriptor
+        if descriptor.command is None:  # pragma: no cover - Programmierfehler in einer Plattform
+            raise HomeAssistantError(f"Entität {self.entity_id!r} kennt keinen Befehl")
+        outcome, reason = await commands.async_send_command(
+            self.hass, self._entry_id, descriptor.command, {**descriptor.command_data, **data}
+        )
+        if outcome is not CommandOutcome.EXECUTED:
+            raise HomeAssistantError(reason or outcome.value)
 
     def _apply_raw_state(self, value: str, attributes: dict[str, Any]) -> None:
         raise NotImplementedError

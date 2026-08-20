@@ -10,9 +10,11 @@ danach ein Geräte-Key, der ausschließlich als Hash in Home Assistant landet.
 Das Nachrichtenformat auf dem WebSocket-Kanal steht in [PROTOCOL.md](PROTOCOL.md) -
 das ist die Wahrheit für beide Seiten (App und Integration).
 
-> Status: Kopplung, WebSocket-Kanal und Handshake (`hello`/`hello_ok`/`error`).
-> Echte Entitäten, Befehle und Zugriffs-Freigaben folgen in weiteren Schritten
-> - siehe [planning.md des App-Repos](https://github.com/dominoxp/ha-computer-control/blob/master/planning.md).
+> Status: Kopplung, WebSocket-Kanal, echte Entitäten je PC
+> (`sensor`/`binary_sensor`/`button`/`select`/`number`/`switch`) und Befehle
+> (Entität-Interaktionen plus die Services `hacc.notify`/`hacc.launch`/
+> `hacc.set_displays`). Zugriffs-Freigaben folgen in einem weiteren Schritt -
+> siehe [planning.md des App-Repos](https://github.com/dominoxp/ha-computer-control/blob/master/planning.md).
 
 ## Installation über HACS (Custom Repository)
 

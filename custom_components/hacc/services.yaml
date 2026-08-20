@@ -1,0 +1,82 @@
+notify:
+  name: Benachrichtigung anzeigen
+  description: Zeigt einen Windows-Toast auf dem gewählten PC.
+  target:
+    device:
+      integration: hacc
+  fields:
+    title:
+      name: Titel
+      description: Überschrift des Toasts.
+      required: true
+      example: "Waschmaschine"
+      selector:
+        text:
+    message:
+      name: Text
+      description: Text unter der Überschrift.
+      example: "fertig - ausräumen?"
+      selector:
+        text:
+    icon:
+      name: Symbol
+      description: Optionaler Icon-Pfad.
+      advanced: true
+      selector:
+        text:
+    duration:
+      name: Anzeigedauer
+      description: short, long oder default; alternativ eine Zahl in Sekunden.
+      advanced: true
+      example: "short"
+      selector:
+        text:
+    actions:
+      name: Aktionsknöpfe
+      description: Liste von Aktionsknöpfen, z.B. [{"action": "confirm", "title": "Ja"}].
+      advanced: true
+      selector:
+        object:
+
+launch:
+  name: Programm starten
+  description: Startet einen in der App hinterlegten Eintrag (Steam-Spiel, Programm oder URL).
+  target:
+    device:
+      integration: hacc
+  fields:
+    entry:
+      name: Eintrag
+      description: Id oder Anzeigename eines konfigurierten Eintrags.
+      required: true
+      example: "elden_ring"
+      selector:
+        text:
+
+set_displays:
+  name: Monitore umschalten
+  description: >-
+    Schaltet auf ein Profil oder auf die genannten Monitore um - für den
+    Alltag gibt es dafür auch eine select-Entität je PC.
+  target:
+    device:
+      integration: hacc
+  fields:
+    profile:
+      name: Profil
+      description: Name eines in den Einstellungen angelegten Profils.
+      example: "arbeiten"
+      selector:
+        text:
+    monitors:
+      name: Monitore
+      description: Alternativ - Liste der Monitor-Aliase.
+      example: ["links", "mitte"]
+      selector:
+        object:
+    primary:
+      name: Primärmonitor
+      description: Welcher der gewählten Monitore der Primärmonitor sein soll.
+      example: "mitte"
+      selector:
+        text:

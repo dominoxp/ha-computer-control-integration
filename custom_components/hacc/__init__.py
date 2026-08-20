@@ -14,14 +14,16 @@ from homeassistant.core import HomeAssistant
 from .connection import get_domain_data
 from .const import PLATFORMS
 from .http import PairView, WebSocketView
+from .services import async_register_services
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Register the pairing/websocket HTTP views exactly once for the whole integration."""
+    """Register the pairing/websocket HTTP views and the services exactly once."""
     domain_data = get_domain_data(hass)
     if not domain_data.views_registered:
         hass.http.register_view(PairView())
         hass.http.register_view(WebSocketView())
+        async_register_services(hass)
         domain_data.views_registered = True
     return True
 
