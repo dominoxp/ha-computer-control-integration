@@ -7,9 +7,12 @@ Diese Integration ist die einzige Schnittstelle zwischen App und HA: kein
 Long-Lived Access Token, sondern eine Kopplung per kurzem Einmalcode und
 danach ein Geräte-Key, der ausschließlich als Hash in Home Assistant landet.
 
-> Status: Grundgerüst (Kopplung + WebSocket-Kanal). Echte Entitäten, Befehle
-> und Zugriffs-Freigaben folgen in weiteren Schritten - siehe
-> [planning.md des App-Repos](https://github.com/dominoxp/ha-computer-control/blob/master/planning.md).
+Das Nachrichtenformat auf dem WebSocket-Kanal steht in [PROTOCOL.md](PROTOCOL.md) -
+das ist die Wahrheit für beide Seiten (App und Integration).
+
+> Status: Kopplung, WebSocket-Kanal und Handshake (`hello`/`hello_ok`/`error`).
+> Echte Entitäten, Befehle und Zugriffs-Freigaben folgen in weiteren Schritten
+> - siehe [planning.md des App-Repos](https://github.com/dominoxp/ha-computer-control/blob/master/planning.md).
 
 ## Installation über HACS (Custom Repository)
 
