@@ -11,10 +11,12 @@ Das Nachrichtenformat auf dem WebSocket-Kanal steht in [PROTOCOL.md](PROTOCOL.md
 das ist die Wahrheit für beide Seiten (App und Integration).
 
 > Status: Kopplung, WebSocket-Kanal, echte Entitäten je PC
-> (`sensor`/`binary_sensor`/`button`/`select`/`number`/`switch`) und Befehle
+> (`sensor`/`binary_sensor`/`button`/`select`/`number`/`switch`), Befehle
 > (Entität-Interaktionen plus die Services `hacc.notify`/`hacc.launch`/
-> `hacc.set_displays`). Zugriffs-Freigaben folgen in einem weiteren Schritt -
-> siehe [planning.md des App-Repos](https://github.com/dominoxp/ha-computer-control/blob/master/planning.md).
+> `hacc.set_displays`) und Zugriffs-Freigaben (Lesen/Schalten fremder Entitäten,
+> einzeln bestätigt im Options-Flow). Damit ist Phase 5 des App-Repos
+> abgeschlossen - siehe
+> [planning.md des App-Repos](https://github.com/dominoxp/ha-computer-control/blob/master/planning.md).
 
 ## Installation über HACS (Custom Repository)
 
@@ -36,6 +38,20 @@ das ist die Wahrheit für beide Seiten (App und Integration).
 
 In der ConfigEntry steht zu keinem Zeitpunkt der Klartext-Code oder -Key -
 Home Assistant speichert ausschließlich Hashes.
+
+## Umstieg vom Token-Weg
+
+Wer die App bisher über ein Long-Lived Access Token angebunden hatte (vor Phase 5 der
+App), stellt in dieser Reihenfolge um:
+
+1. Diese Integration wie oben beschrieben über HACS installieren.
+2. Koppeln wie oben beschrieben (Kopplungscode aus HA in die App eintragen).
+3. Die alte `ha_package_<geraet>.yaml` aus `<ha-config>/packages/` löschen - die
+   Skripte und der Online-Sensor darin sind mit der Kopplung überflüssig.
+4. **Das alte Long-Lived Access Token in Home Assistant widerrufen** (Profil -> unten
+   "Sicherheit" -> Long-Lived Access Tokens -> Löschen). Das ist der wichtigste
+   Schritt: Solange das Token gültig bleibt, hat der Umstieg an der eigentlichen
+   Angriffsfläche nichts verbessert.
 
 ## Entwicklung
 
