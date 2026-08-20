@@ -17,10 +17,11 @@ passende Änderung in beiden Repos nach sich.
   vergebene `id` (aufsteigende Ganzzahl); die Antwort trägt dieselbe `id`
   zurück. Alle übrigen Nachrichten sind Fire-and-Forget - dafür gibt es keine
   Anwendungs-Quittung.
-- `PROTOCOL_VERSION = 1` steht als Literal auf beiden Seiten (App:
+- `PROTOCOL_VERSION = 2` steht als Literal auf beiden Seiten (App:
   `hacc.core.ha_client.PROTOCOL_VERSION`, Integration:
   `custom_components/hacc/const.py`). Ändert sich das Format inkompatibel,
-  steigt die Zahl auf beiden Seiten gemeinsam.
+  steigt die Zahl auf beiden Seiten gemeinsam - zuletzt in Step 5.3, als
+  `state` von `entity_id` auf `key` umgestellt wurde.
 - Der WebSocket-Ping (aiohttp `heartbeat=`/`autoping=True`) hält die
   Verbindung am Leben; er ist unabhängig von den Nachrichten unten.
 
@@ -31,8 +32,8 @@ passende Änderung in beiden Repos nach sich.
 | PC → HA  | `hello`        | Protokollversion, Gerätename, App- und OS-Version    | lebt seit 5.1 |
 | HA → PC  | `hello_ok`     | Geräte-Id, HA-Version, Protokollversion              | lebt seit 5.1 |
 | HA → PC  | `error`        | Ablehnung mit `code` und `message`                   | lebt seit 5.1 |
-| PC → HA  | `register`     | vollständiges Manifest der eigenen Entitäten         | wird seit 5.2 gesendet, HA legt noch nichts an (5.3) |
-| PC → HA  | `state`        | Zustandsänderungen (Sammelnachricht möglich)         | wird seit 5.2 gesendet, HA hält noch keine Entitäten (5.3) |
+| PC → HA  | `register`     | vollständiges Manifest der eigenen Entitäten         | lebt seit 5.3 |
+| PC → HA  | `state`        | Zustandsänderungen (Sammelnachricht möglich)         | lebt seit 5.3 |
 | PC → HA  | `event`        | Meldungen an HA (Notification, Aktion)               | wird seit 5.2 gesendet, HA wertet noch nicht aus (5.3+) |
 | PC → HA  | `call_service` | Service-Aufruf mit Antwort                           | Client sendet seit 5.2, HA antwortet erst ab 5.5 (bis dahin Timeout) |
 | HA → PC  | `result`       | Ausgang eines Befehls oder `call_service`-Aufrufs    | spezifiziert, noch nicht gesendet (5.4/5.5) |
@@ -49,7 +50,7 @@ passende Änderung in beiden Repos nach sich.
 ```json
 {
   "type": "hello",
-  "protocol_version": 1,
+  "protocol_version": 2,
   "device_name": "buero_pc",
   "app_version": "0.5.0",
   "os_version": "Windows-11-10.0.22631"
@@ -62,13 +63,13 @@ dieser frischen Verbindung.
 ### `hello_ok` (HA → PC)
 
 ```json
-{ "type": "hello_ok", "protocol_version": 1, "ha_version": "2024.7.0", "device_id": "a1b2…" }
+{ "type": "hello_ok", "protocol_version": 2, "ha_version": "2024.7.0", "device_id": "a1b2…" }
 ```
 
 ### `error` (HA → PC)
 
 ```json
-{ "type": "error", "id": null, "code": "protocol_version_mismatch", "message": "HA erwartet Protokollversion 1." }
+{ "type": "error", "id": null, "code": "protocol_version_mismatch", "message": "HA erwartet Protokollversion 2." }
 ```
 
 `id` ist `null`, solange der Fehler die `hello`-Nachricht selbst betrifft
@@ -78,8 +79,13 @@ dieser frischen Verbindung.
 
 ### `register` (PC → HA)
 
-Einmal direkt nach `hello_ok`. Ein Eintrag pro Entität, die dieser PC führt -
-inhaltlich deckungsgleich mit `hacc.core.entities.EntityDef`.
+Einmal direkt nach `hello_ok`, danach erneut bei jedem Reconnect (voller
+Ist-Stand, kein Diff). Ein Eintrag pro Entität, die dieser PC führt - inhaltlich
+deckungsgleich mit `hacc.core.entities.EntityDef`. `attributes` sind statische
+Extra-Attribute der Definition (selten genutzt); `icon`/`unit`/`device_class`/
+`state_class` und der aus `device_name` + `name` gebildete Anzeigename werden zu
+echten HA-Entity-Eigenschaften - sie reisen deshalb nur hier, nicht mehr über
+`state`.
 
 ```json
 {
@@ -100,17 +106,32 @@ inhaltlich deckungsgleich mit `hacc.core.entities.EntityDef`.
 }
 ```
 
+HA legt daraus ein Gerät je PC an (`identifiers = (DOMAIN, device_id)`,
+Hersteller/Modell/Software-Version aus `hello`) und pro Eintrag eine Entität mit
+`unique_id = f"{device_id}_{key}"`. Die **entity_id** überlässt HA vollständig
+sich selbst (Standard-Ableitung aus Gerätename + `name`, initial an `key`
+ausgerichtet) - sie darf im HA-Frontend umbenannt werden, ohne dass ein
+späteres `register`/`state` das rückgängig macht. `key` ist also die stabile
+Wire-Identität, `entity_id` gehört HA und dem Nutzer. Ein Key, den ein neues
+`register` nicht mehr nennt, wird aus der Entity-Registry entfernt (Modul
+abgeschaltet, überwachte App entfernt); ein Verbindungsabbruch allein löscht
+nichts, nur `available` wird `false`.
+
 ### `state` (PC → HA)
 
 Einmal mit dem Ist-Stand direkt nach `register`, danach bei jeder Änderung.
 Immer eine Liste, auch bei genau einem Eintrag - eine Sammelnachricht für
 mehrere gleichzeitige Änderungen ist zulässig, aber nicht vorgeschrieben.
+Identifiziert wird über `key` (siehe oben), nicht über `entity_id` - der wäre
+nach einer Umbenennung in HA nicht mehr aktuell. `attributes` enthält nur noch
+echte Laufzeitwerte (z.B. `pid` einer laufenden App), keine der Basisfelder aus
+`register`.
 
 ```json
 {
   "type": "state",
   "states": [
-    { "entity_id": "sensor.buero_pc_heartbeat", "state": "ok", "attributes": { "friendly_name": "buero_pc Heartbeat" } }
+    { "key": "heartbeat", "state": "ok", "attributes": {} }
   ]
 }
 ```

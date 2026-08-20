@@ -4,10 +4,26 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from homeassistant.const import Platform
+
 DOMAIN = "hacc"
 
-# Wird bei jedem hello/hello_ok gegeneinander geprüft (Step 5.2 füllt das Protokoll).
-PROTOCOL_VERSION = 1
+# Wird bei jedem hello/hello_ok gegeneinander geprüft. Auf 2 seit Step 5.3: die
+# state-Nachricht identifiziert Entitäten jetzt über "key" statt "entity_id"
+# (siehe PROTOCOL.md) - inkompatibel zum bisherigen Format.
+PROTOCOL_VERSION = 2
+
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
+
+DEVICE_MANUFACTURER = "HA Computer Control"
+
+# .format(entry_id). Payload: list[str] der Manifest-Keys ohne lebende Entität -
+# Plattformen legen daraus neue Entitäten an (auch wenn der Key schon einmal
+# existierte, aber z.B. in HA gelöscht wurde).
+SIGNAL_ENTITY_REGISTERED = "hacc_entity_registered_{}"
+# .format(entry_id). Kein Payload - stößt nur async_write_ha_state() an, damit
+# `available` (liest ConnectionState.connected live) neu ausgewertet wird.
+SIGNAL_CONNECTION_STATE = "hacc_connection_state_{}"
 
 # Kopplungscode: kurz und abtippbar, aber ohne leicht verwechselbare Zeichen.
 PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"  # ohne 0/O/1/I/L

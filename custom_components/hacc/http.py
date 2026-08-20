@@ -20,6 +20,7 @@ from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.http import HomeAssistantView
 
+from . import connection as conn
 from .connection import clear_connection, get_connection_state, get_domain_data, replace_connection
 from .const import (
     DATA_DEVICE_ID,
@@ -178,25 +179,58 @@ class WebSocketView(HomeAssistantView):
         ws = web.WebSocketResponse(heartbeat=WS_HEARTBEAT_SECONDS)
         await ws.prepare(request)
 
-        if not await self._handshake(ws, entry):
+        hello = await self._handshake(ws, entry)
+        if hello is None:
             await ws.close()
             return ws
 
         await replace_connection(hass, entry.entry_id, device_id, ws)
+        conn.async_set_hello_info(
+            hass,
+            entry.entry_id,
+            str(hello.get("device_name") or entry.title),
+            hello.get("app_version"),
+            hello.get("os_version"),
+        )
         try:
             async for msg in ws:
-                if msg.type == web.WSMsgType.ERROR:
+                if msg.type == web.WSMsgType.TEXT:
+                    self._handle_message(hass, entry, msg.data)
+                elif msg.type == web.WSMsgType.ERROR:
                     _LOGGER.warning(
                         "hacc-WebSocket-Fehler für ConfigEntry %s: %s",
                         entry.entry_id,
                         ws.exception(),
                     )
-                # Weitere Nachrichtentypen (register/state/command/...) kommen ab Step 5.2.
+                # command/event/call_service (Step 5.4/5.5) kommen hier noch nicht an.
         finally:
             if get_connection_state(hass, entry.entry_id).ws is ws:
                 clear_connection(hass, entry.entry_id)
 
         return ws
+
+    @staticmethod
+    def _handle_message(hass: HomeAssistant, entry: ConfigEntry, raw: str) -> None:
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            _LOGGER.warning("Ungültiges JSON von ConfigEntry %s ignoriert", entry.entry_id)
+            return
+        if not isinstance(payload, dict):
+            return
+
+        kind = payload.get("type")
+        if kind == "register":
+            conn.async_apply_register(
+                hass,
+                entry,
+                str(payload.get("device_name") or entry.title),
+                payload.get("entities") or [],
+            )
+        elif kind == "state":
+            conn.async_apply_state(hass, entry.entry_id, payload.get("states") or [])
+        # event/call_service (Step 5.4/5.5) sind hier noch kein Sonderfall - unbekannte
+        # Typen werden bewusst stillschweigend ignoriert.
 
     @staticmethod
     def _find_entry_for_device(hass: HomeAssistant, device_id: str) -> ConfigEntry | None:
@@ -206,28 +240,29 @@ class WebSocketView(HomeAssistantView):
         return None
 
     @staticmethod
-    async def _handshake(ws: web.WebSocketResponse, entry: ConfigEntry) -> bool:
+    async def _handshake(ws: web.WebSocketResponse, entry: ConfigEntry) -> dict[str, Any] | None:
+        """hello annehmen, hello_ok/error beantworten; liefert die hello-Payload zurück."""
         try:
             msg = await ws.receive(timeout=HELLO_TIMEOUT_SECONDS)
         except TimeoutError:
             await _send_error(
                 ws, ERROR_INVALID_MESSAGE, "Zeitüberschreitung beim Warten auf hello."
             )
-            return False
+            return None
 
         if msg.type != web.WSMsgType.TEXT:
             await _send_error(ws, ERROR_INVALID_MESSAGE, "Erwarte eine hello-Nachricht.")
-            return False
+            return None
 
         try:
             payload = json.loads(msg.data)
         except ValueError:
             await _send_error(ws, ERROR_INVALID_MESSAGE, "Ungültiges JSON.")
-            return False
+            return None
 
         if not isinstance(payload, dict) or payload.get("type") != "hello":
             await _send_error(ws, ERROR_INVALID_MESSAGE, "Erwarte eine hello-Nachricht.")
-            return False
+            return None
 
         if payload.get("protocol_version") != PROTOCOL_VERSION:
             _LOGGER.warning(
@@ -241,7 +276,7 @@ class WebSocketView(HomeAssistantView):
                 ERROR_PROTOCOL_VERSION,
                 f"HA erwartet Protokollversion {PROTOCOL_VERSION}.",
             )
-            return False
+            return None
 
         await _send_json(
             ws,
@@ -252,4 +287,4 @@ class WebSocketView(HomeAssistantView):
                 "device_id": entry.data.get(DATA_DEVICE_ID),
             },
         )
-        return True
+        return payload

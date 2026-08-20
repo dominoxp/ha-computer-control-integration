@@ -1,8 +1,9 @@
 """The HA Computer Control integration.
 
-This step only builds the transport: pairing, the WebSocket channel and a
-per-device connection state in hass.data. Entities, commands and access grants
-follow in later steps of Phase 5 - see PROTOCOL.md (Step 5.2) once it exists.
+Builds the transport (pairing, WebSocket channel, per-device connection state in
+hass.data) and, since Step 5.3, forwards to the sensor/binary_sensor platforms
+that turn a connected PC's manifest into real entities. Commands and access
+grants follow in later steps of Phase 5 - see PROTOCOL.md.
 """
 
 from __future__ import annotations
@@ -11,9 +12,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .connection import get_domain_data
+from .const import PLATFORMS
 from .http import PairView, WebSocketView
-
-PLATFORMS: list[str] = []
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -27,15 +27,17 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up one PC's ConfigEntry - just ensures its runtime state exists."""
+    """Set up one PC's ConfigEntry: runtime state plus its entity platforms."""
     get_domain_data(hass)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Tear down one PC's ConfigEntry, closing any open connection."""
+    """Tear down one PC's ConfigEntry: platforms first, then the open connection."""
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     domain_data = get_domain_data(hass)
     state = domain_data.connections.pop(entry.entry_id, None)
     if state is not None and state.ws is not None and not state.ws.closed:
         await state.ws.close()
-    return True
+    return unloaded

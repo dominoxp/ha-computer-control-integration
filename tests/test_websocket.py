@@ -8,7 +8,7 @@ from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
-from custom_components.hacc.connection import get_domain_data
+from custom_components.hacc.connection import get_connection_state
 from custom_components.hacc.const import (
     DATA_DEVICE_ID,
     DATA_DEVICE_KEY_HASH,
@@ -70,7 +70,13 @@ async def test_connection_refused_with_wrong_key(
 
     resp = await client.get(_ws_url(device_id, "not-the-right-key"))
     assert resp.status == 401
-    assert entry.entry_id not in get_domain_data(hass).connections
+    # Seit Step 5.3 legt schon das Plattform-Setup (sensor/binary_sensor) einen
+    # leeren ConnectionState pro ConfigEntry an - "kein Key im Dict" ist deshalb
+    # kein brauchbares Signal mehr. Der Punkt bleibt derselbe: der falsche
+    # Schlüssel hat keine echte Verbindung zustande gebracht.
+    state = get_connection_state(hass, entry.entry_id)
+    assert state.ws is None
+    assert state.connected is False
 
 
 async def test_connection_refused_without_key(
