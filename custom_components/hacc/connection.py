@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -26,11 +27,13 @@ from typing import TYPE_CHECKING, Any
 from aiohttp import WSCloseCode
 from aiohttp.web import WebSocketResponse
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.event import async_track_state_change_event
 
+from . import access
 from .const import (
     DATA_DEVICE_ID,
     DEVICE_MANUFACTURER,
@@ -115,6 +118,11 @@ class ConnectionState:
     live_entities: dict[str, HaccEntity] = field(default_factory=dict)
     next_command_id: int = 0
     pending_commands: dict[int, PendingCommand] = field(default_factory=dict)
+    subscribed: frozenset[str] = field(default_factory=frozenset)
+    """Letzter `subscribe`-Wunsch des PCs (Step 5.5) - nicht persistiert, wird
+    bei jedem (Re-)Connect frisch vom Client geschickt."""
+    entity_unsubs: dict[str, Callable[[], None]] = field(default_factory=dict)
+    """Laufende Zustands-Abos auf fremde HA-Entitäten, je Entity-Id (Step 5.5)."""
 
 
 @dataclass(slots=True)
@@ -161,6 +169,9 @@ def clear_connection(hass: HomeAssistant, entry_id: str) -> None:
     state = get_connection_state(hass, entry_id)
     state.connected = False
     state.ws = None
+    for unsub in state.entity_unsubs.values():
+        unsub()
+    state.entity_unsubs.clear()
     async_dispatcher_send(hass, SIGNAL_CONNECTION_STATE.format(entry_id), None)
 
 
@@ -388,3 +399,107 @@ def async_apply_event(hass: HomeAssistant, entry: ConfigEntry, payload: dict[str
     hass.bus.async_fire(
         mapped, {"device_id": state.device_id, **(data if isinstance(data, dict) else {})}
     )
+
+
+# -- Fremde HA-Entitäten lesen (Step 5.5) ------------------------------------
+
+
+async def async_send_access(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Aktuelle Freigabe-Tabelle an ein verbundenes Gerät schicken (siehe PROTOCOL.md)."""
+    state = get_connection_state(hass, entry.entry_id)
+    if state.ws is None or state.ws.closed:
+        return
+    await state.ws.send_json(access.access_message(entry))
+
+
+async def _push_entity_state(hass: HomeAssistant, entry: ConfigEntry, ha_state: State) -> None:
+    state = get_connection_state(hass, entry.entry_id)
+    if state.ws is None or state.ws.closed:
+        return
+    await state.ws.send_json(
+        {
+            "type": "entity",
+            "entity_id": ha_state.entity_id,
+            "state": ha_state.state,
+            "attributes": dict(ha_state.attributes),
+            "last_updated": ha_state.last_updated.timestamp(),
+        }
+    )
+
+
+async def _push_current_states(
+    hass: HomeAssistant, entry: ConfigEntry, entity_ids: list[str]
+) -> None:
+    for entity_id in entity_ids:
+        ha_state = hass.states.get(entity_id)
+        if ha_state is not None:
+            await _push_entity_state(hass, entry, ha_state)
+
+
+def _make_state_listener(hass: HomeAssistant, entry: ConfigEntry) -> Callable[[Event], None]:
+    @callback
+    def _listener(event: Event[EventStateChangedData]) -> None:
+        new_state = event.data.get("new_state")
+        if new_state is not None:
+            hass.async_create_task(_push_entity_state(hass, entry, new_state))
+
+    return _listener
+
+
+@callback
+def _sync_entity_listeners(hass: HomeAssistant, entry: ConfigEntry) -> list[str]:
+    """`entity_unsubs` gegen `subscribed ∩ granted` abgleichen.
+
+    Legt Abos für neu freigegebene/gewünschte Entitäten an und beendet
+    verwaiste (nicht mehr gewünscht oder Freigabe entzogen) - Letzteres ist
+    der Grund, warum ein Widerruf sofort wirkt, ohne dass jemand etwas neu
+    startet. Gibt die frisch abonnierten Entity-Ids zurück, für die noch ein
+    Ist-Zustand nachgeliefert werden muss.
+    """
+    state = get_connection_state(hass, entry.entry_id)
+    granted = set(access.granted_read_entities(entry))
+    wanted = state.subscribed & granted
+
+    for entity_id in [key for key in state.entity_unsubs if key not in wanted]:
+        state.entity_unsubs.pop(entity_id)()
+
+    newly = [entity_id for entity_id in wanted if entity_id not in state.entity_unsubs]
+    for entity_id in newly:
+        state.entity_unsubs[entity_id] = async_track_state_change_event(
+            hass, entity_id, _make_state_listener(hass, entry)
+        )
+    return newly
+
+
+async def async_apply_subscribe(
+    hass: HomeAssistant, entry: ConfigEntry, entity_ids: list[Any]
+) -> None:
+    """`subscribe`-Nachricht verarbeiten (siehe PROTOCOL.md).
+
+    Ersetzt den gesamten Wunsch (kein Diff, wie `register`). Nicht
+    freigegebene Entitäten lösen automatisch eine Anfrage aus
+    (:func:`hacc.access.request_read`); ein bereits abgelehnter Eintrag wird
+    dabei nicht angerührt."""
+    state = get_connection_state(hass, entry.entry_id)
+    state.subscribed = frozenset(
+        str(entity_id)
+        for entity_id in entity_ids
+        if isinstance(entity_id, str) and entity_id.strip()
+    )
+
+    for entity_id in state.subscribed:
+        if not access.is_read_granted(entry, entity_id):
+            access.request_read(hass, entry, entity_id)
+
+    newly = _sync_entity_listeners(hass, entry)
+    await _push_current_states(hass, entry, newly)
+    await async_send_access(hass, entry)
+
+
+async def async_apply_access_change(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Nach einer Options-Flow-Änderung (Freigabe oder Such-Modus) ein gerade
+    verbundenes Gerät sofort nachziehen - Bestätigen/Widerrufen wirkt ohne
+    Neustart."""
+    newly = _sync_entity_listeners(hass, entry)
+    await _push_current_states(hass, entry, newly)
+    await async_send_access(hass, entry)

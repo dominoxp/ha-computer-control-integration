@@ -14,12 +14,16 @@ import uuid
 from http import HTTPStatus
 from typing import Any
 
+import voluptuous as vol
 from aiohttp import web
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers.http import HomeAssistantView
+from homeassistant.helpers.service import async_get_all_descriptions
 
+from . import access
 from . import connection as conn
 from .connection import clear_connection, get_connection_state, get_domain_data, replace_connection
 from .const import (
@@ -29,6 +33,8 @@ from .const import (
     DATA_PAIRING_CODE_EXPIRES_AT,
     DATA_PAIRING_CODE_HASH,
     DOMAIN,
+    ERROR_ACCESS_DENIED,
+    ERROR_ACCESS_PENDING,
     ERROR_INVALID_MESSAGE,
     ERROR_INVALID_OR_EXPIRED,
     ERROR_PROTOCOL_VERSION,
@@ -153,6 +159,128 @@ async def _send_error(
     await _send_json(ws, {"type": "error", "id": msg_id, "code": code, "message": message})
 
 
+async def _send_result(
+    ws: web.WebSocketResponse, msg_id: Any, success: bool, code: str = "", message: str = ""
+) -> None:
+    error = None if success else {"code": code, "message": message}
+    await _send_json(ws, {"type": "result", "id": msg_id, "success": success, "error": error})
+
+
+async def _handle_call_service(
+    hass: HomeAssistant, entry: ConfigEntry, ws: web.WebSocketResponse, payload: dict[str, Any]
+) -> None:
+    """`call_service`-Nachricht verarbeiten (Step 5.5) - siehe PROTOCOL.md.
+
+    Fremde Services laufen nur mit ausdrücklicher Freigabe durch; ohne sie
+    entsteht (gedeckelt, mit Denied-bleibt-Denied) automatisch eine Anfrage
+    im Options-Flow, und die Antwort kommt sofort statt in einen Timeout zu
+    laufen - die Ablehnung ist ja schon bekannt."""
+    msg_id = payload.get("id")
+    domain = str(payload.get("domain") or "")
+    service = str(payload.get("service") or "")
+    if not domain or not service:
+        await _send_result(ws, msg_id, False, ERROR_INVALID_MESSAGE, "domain/service fehlt")
+        return
+
+    target = payload.get("target")
+    target_entity = target.get("entity_id") if isinstance(target, dict) else None
+    if isinstance(target_entity, list):
+        target_entity = target_entity[0] if target_entity else None
+
+    if not access.is_call_granted(entry, domain, service, target_entity):
+        grant = access.call_grants(entry).get(access.call_key(domain, service))
+        if grant is not None and grant.status is access.AccessStatus.DENIED:
+            await _send_result(
+                ws, msg_id, False, ERROR_ACCESS_DENIED, "Zugriff in Home Assistant abgelehnt."
+            )
+        elif grant is not None and grant.status is access.AccessStatus.GRANTED:
+            # Freigegeben, aber nicht für dieses Ziel - keine neue Anfrage nötig
+            # (request_call würde bei granted ohnehin nichts ändern).
+            await _send_result(ws, msg_id, False, ERROR_ACCESS_DENIED, "Ziel nicht freigegeben.")
+        else:
+            access.request_call(hass, entry, domain, service, target_entity)
+            await _send_result(
+                ws,
+                msg_id,
+                False,
+                ERROR_ACCESS_PENDING,
+                "Noch nicht in Home Assistant bestätigt.",
+            )
+            # Erst die eindeutige Antwort auf diesen Aufruf, dann die (separate)
+            # Tabellen-Aktualisierung - der Aufrufer soll nicht auf sie warten müssen.
+            await conn.async_send_access(hass, entry)
+        return
+
+    service_data = payload.get("service_data")
+    try:
+        await hass.services.async_call(
+            domain,
+            service,
+            dict(service_data) if isinstance(service_data, dict) else {},
+            target=target if isinstance(target, dict) else None,
+            blocking=True,
+        )
+    except (ServiceNotFound, HomeAssistantError, vol.Invalid) as exc:
+        await _send_result(ws, msg_id, False, "failed", str(exc))
+        return
+    await _send_result(ws, msg_id, True)
+
+
+async def _handle_catalog(
+    hass: HomeAssistant, entry: ConfigEntry, ws: web.WebSocketResponse, payload: dict[str, Any]
+) -> None:
+    """`catalog`-Anfrage beantworten (Step 5.5) - nur bereits Freigegebenes,
+    plus Namen-only, wenn der Such-Modus für dieses Gerät an ist."""
+    entities: list[dict[str, Any]] = []
+    for entity_id in access.granted_read_entities(entry):
+        ha_state = hass.states.get(entity_id)
+        if ha_state is not None:
+            entities.append(
+                {
+                    "entity_id": entity_id,
+                    "state": ha_state.state,
+                    "attributes": dict(ha_state.attributes),
+                    "last_updated": ha_state.last_updated.timestamp(),
+                }
+            )
+
+    descriptions = await async_get_all_descriptions(hass)
+    services: list[dict[str, Any]] = []
+    for key in access.granted_call_keys(entry):
+        domain, _, service = key.partition(".")
+        info = descriptions.get(domain, {}).get(service) or {}
+        services.append(
+            {
+                "domain": domain,
+                "service": service,
+                "name": info.get("name", ""),
+                "description": info.get("description", ""),
+            }
+        )
+
+    result: dict[str, Any] = {
+        "type": "catalog",
+        "id": payload.get("id"),
+        "entities": entities,
+        "services": services,
+    }
+    if access.discovery_enabled(entry):
+        result["discoverable_entities"] = [
+            {"entity_id": s.entity_id, "name": s.attributes.get("friendly_name", "")}
+            for s in hass.states.async_all()
+        ]
+        result["discoverable_services"] = [
+            {
+                "domain": domain,
+                "service": service,
+                "name": (descriptions.get(domain, {}).get(service) or {}).get("name", ""),
+            }
+            for domain, services_map in hass.services.async_services().items()
+            for service in services_map
+        ]
+    await _send_json(ws, result)
+
+
 class WebSocketView(HomeAssistantView):
     """GET /api/hacc/ws - the persistent, device-key-authenticated connection."""
 
@@ -195,14 +323,13 @@ class WebSocketView(HomeAssistantView):
         try:
             async for msg in ws:
                 if msg.type == web.WSMsgType.TEXT:
-                    self._handle_message(hass, entry, msg.data)
+                    await self._handle_message(hass, entry, ws, msg.data)
                 elif msg.type == web.WSMsgType.ERROR:
                     _LOGGER.warning(
                         "hacc-WebSocket-Fehler für ConfigEntry %s: %s",
                         entry.entry_id,
                         ws.exception(),
                     )
-                # call_service (Step 5.5) kommt hier noch nicht an.
         finally:
             if get_connection_state(hass, entry.entry_id).ws is ws:
                 clear_connection(hass, entry.entry_id)
@@ -210,7 +337,9 @@ class WebSocketView(HomeAssistantView):
         return ws
 
     @staticmethod
-    def _handle_message(hass: HomeAssistant, entry: ConfigEntry, raw: str) -> None:
+    async def _handle_message(
+        hass: HomeAssistant, entry: ConfigEntry, ws: web.WebSocketResponse, raw: str
+    ) -> None:
         try:
             payload = json.loads(raw)
         except ValueError:
@@ -233,8 +362,13 @@ class WebSocketView(HomeAssistantView):
             conn.async_apply_command_result(hass, entry, payload)
         elif kind == "event":
             conn.async_apply_event(hass, entry, payload)
-        # call_service (Step 5.5) ist hier noch kein Sonderfall - unbekannte Typen
-        # werden bewusst stillschweigend ignoriert.
+        elif kind == "subscribe":
+            await conn.async_apply_subscribe(hass, entry, payload.get("entities") or [])
+        elif kind == "call_service":
+            await _handle_call_service(hass, entry, ws, payload)
+        elif kind == "catalog":
+            await _handle_catalog(hass, entry, ws, payload)
+        # Unbekannte Typen werden bewusst stillschweigend ignoriert (Vorwärtskompatibilität).
 
     @staticmethod
     def _find_entry_for_device(hass: HomeAssistant, device_id: str) -> ConfigEntry | None:

@@ -8,6 +8,8 @@ from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
+from custom_components.hacc import access
+from custom_components.hacc import connection as conn
 from custom_components.hacc.connection import get_connection_state
 from custom_components.hacc.const import (
     DATA_DEVICE_ID,
@@ -129,3 +131,94 @@ async def test_second_connection_replaces_first(
 
     await ws1.close()
     await ws2.close()
+
+
+async def _hello(ws: aiohttp.ClientWebSocketResponse) -> None:
+    await ws.send_json({"type": "hello", "protocol_version": PROTOCOL_VERSION, "device_name": "PC"})
+    await ws.receive_json()
+
+
+async def test_subscribe_to_granted_entity_receives_state(
+    hass: HomeAssistant, hass_client_no_auth: ClientSessionGenerator
+):
+    device_id, device_key, entry = await _setup_paired_entry(hass)
+    hass.states.async_set("sensor.drucker_status", "printing", {"friendly_name": "Drucker"})
+    access.grant_read(hass, entry, ["sensor.drucker_status"])
+    client = await hass_client_no_auth()
+
+    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+        await _hello(ws)
+        await ws.send_json({"type": "subscribe", "entities": ["sensor.drucker_status"]})
+
+        messages = [await ws.receive_json() for _ in range(2)]
+        kinds = {m["type"] for m in messages}
+        assert kinds == {"entity", "access"}
+
+        entity_msg = next(m for m in messages if m["type"] == "entity")
+        assert entity_msg["entity_id"] == "sensor.drucker_status"
+        assert entity_msg["state"] == "printing"
+
+        access_msg = next(m for m in messages if m["type"] == "access")
+        assert access_msg["read"]["sensor.drucker_status"] == "granted"
+
+
+async def test_subscribe_to_ungranted_entity_creates_request(
+    hass: HomeAssistant, hass_client_no_auth: ClientSessionGenerator
+):
+    device_id, device_key, entry = await _setup_paired_entry(hass)
+    client = await hass_client_no_auth()
+
+    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+        await _hello(ws)
+        await ws.send_json({"type": "subscribe", "entities": ["light.buero"]})
+
+        access_msg = await ws.receive_json()
+        assert access_msg["type"] == "access"
+        assert access_msg["read"]["light.buero"] == "requested"
+
+    assert access.read_grants(entry)["light.buero"].status is access.AccessStatus.REQUESTED
+
+
+async def test_live_state_changes_are_pushed(
+    hass: HomeAssistant, hass_client_no_auth: ClientSessionGenerator
+):
+    device_id, device_key, entry = await _setup_paired_entry(hass)
+    hass.states.async_set("sensor.drucker_status", "printing")
+    access.grant_read(hass, entry, ["sensor.drucker_status"])
+    client = await hass_client_no_auth()
+
+    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+        await _hello(ws)
+        await ws.send_json({"type": "subscribe", "entities": ["sensor.drucker_status"]})
+        await ws.receive_json()
+        await ws.receive_json()  # entity + access, Reihenfolge nicht relevant
+
+        hass.states.async_set("sensor.drucker_status", "idle")
+        entity_msg = await ws.receive_json()
+        assert entity_msg["type"] == "entity"
+        assert entity_msg["state"] == "idle"
+
+
+async def test_revoking_access_stops_live_updates_immediately(
+    hass: HomeAssistant, hass_client_no_auth: ClientSessionGenerator
+):
+    device_id, device_key, entry = await _setup_paired_entry(hass)
+    hass.states.async_set("sensor.drucker_status", "printing")
+    access.grant_read(hass, entry, ["sensor.drucker_status"])
+    client = await hass_client_no_auth()
+
+    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+        await _hello(ws)
+        await ws.send_json({"type": "subscribe", "entities": ["sensor.drucker_status"]})
+        await ws.receive_json()
+        await ws.receive_json()
+
+        access.revoke_read(hass, entry, ["sensor.drucker_status"])
+        await conn.async_apply_access_change(hass, entry)
+
+        access_msg = await ws.receive_json()
+        assert access_msg["type"] == "access"
+        assert "sensor.drucker_status" not in access_msg["read"]
+
+    state = get_connection_state(hass, entry.entry_id)
+    assert "sensor.drucker_status" not in state.entity_unsubs

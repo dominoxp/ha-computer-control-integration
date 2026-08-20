@@ -40,6 +40,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     domain_data = get_domain_data(hass)
     state = domain_data.connections.pop(entry.entry_id, None)
-    if state is not None and state.ws is not None and not state.ws.closed:
-        await state.ws.close()
+    if state is not None:
+        for unsub in state.entity_unsubs.values():
+            unsub()
+        if state.ws is not None and not state.ws.closed:
+            await state.ws.close()
     return unloaded

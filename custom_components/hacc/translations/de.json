@@ -10,8 +10,70 @@
   "options": {
     "step": {
       "init": {
+        "title": "HA Computer Control",
+        "menu_options": {
+          "pairing_code": "Neuen Kopplungscode erzeugen",
+          "access": "Zugriffs-Freigaben verwalten"
+        }
+      },
+      "pairing_code": {
         "title": "Neuen Kopplungscode erzeugen",
         "description": "Ein zuvor angezeigter Code wird damit ungültig. Diesen neuen Code in der App eingeben:\n\n## {code}"
+      },
+      "access": {
+        "title": "Zugriffs-Freigaben",
+        "menu_options": {
+          "access_pending": "Offene Anfragen bearbeiten",
+          "access_granted": "Freigaben verwalten",
+          "access_denied": "Abgelehnte wieder öffnen",
+          "access_grant_read": "Lese-Freigabe proaktiv erteilen",
+          "access_grant_call": "Service proaktiv freigeben",
+          "access_discovery": "Such-Modus"
+        }
+      },
+      "access_pending": {
+        "title": "Offene Anfragen",
+        "description": "Dieser PC hat um diese Entitäten/Services gebeten. Anhaken zum Bestätigen oder Ablehnen - nicht angehakte Einträge bleiben offen.",
+        "data": {
+          "grant": "Freigeben",
+          "deny": "Ablehnen"
+        }
+      },
+      "access_granted": {
+        "title": "Erteilte Freigaben",
+        "description": "Freigaben widerrufen, die dieser PC gerade hat. Widerruf ist nicht dasselbe wie Ablehnen: Ein widerrufener Eintrag darf später wieder angefragt werden, ein abgelehnter wird nicht automatisch erneut angefragt.",
+        "data": {
+          "revoke": "Widerrufen"
+        }
+      },
+      "access_denied": {
+        "title": "Abgelehnte Anfragen",
+        "description": "Einen abgelehnten Eintrag wieder öffnen - er landet dann wieder bei den offenen Anfragen und kann bestätigt werden.",
+        "data": {
+          "reopen": "Wieder öffnen"
+        }
+      },
+      "access_grant_read": {
+        "title": "Lese-Freigabe erteilen",
+        "description": "Diesem PC erlauben, diese Entitäten zu lesen, bevor er überhaupt fragt.",
+        "data": {
+          "entities": "Entitäten"
+        }
+      },
+      "access_grant_call": {
+        "title": "Service freigeben",
+        "description": "Diesem PC erlauben, einen Service aufzurufen - optional auf eine Zielentität beschränkt.",
+        "data": {
+          "service": "Service",
+          "target": "Zielentität (optional)"
+        }
+      },
+      "access_discovery": {
+        "title": "Such-Modus",
+        "description": "Ist der Modus an, kann die Auswahlliste in der App auch alle Namen aus Home Assistant durchsuchen (keine Werte, keine Zustände) - hilft, den richtigen Eintrag zu finden, nicht nur das bereits Freigegebene. Standardmäßig aus.",
+        "data": {
+          "enabled": "Such-Modus aktiviert"
+        }
       }
     }
   }

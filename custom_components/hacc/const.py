@@ -71,6 +71,14 @@ WS_HEARTBEAT_SECONDS = 30
 ERROR_INVALID_OR_EXPIRED = "invalid_or_expired"
 ERROR_PROTOCOL_VERSION = "protocol_version_mismatch"
 ERROR_INVALID_MESSAGE = "invalid_message"
+# Step 5.5: call_service ohne (noch) ausreichende Freigabe (siehe access.py).
+ERROR_ACCESS_PENDING = "access_pending"
+ERROR_ACCESS_DENIED = "access_denied"
+
+# Deckel für offene (requested) Freigabe-Anfragen zusammen (lesen+schalten) -
+# eine kaputte Widget-Konfiguration darf den Options-Flow nicht unbenutzbar
+# machen (siehe access.py).
+MAX_PENDING_ACCESS_REQUESTS = 50
 
 PAIR_PATH = "/api/hacc/pair"
 WS_PATH = "/api/hacc/ws"

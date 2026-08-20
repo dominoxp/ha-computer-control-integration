@@ -35,13 +35,14 @@ passende Änderung in beiden Repos nach sich.
 | PC → HA  | `register`     | vollständiges Manifest der eigenen Entitäten         | lebt seit 5.3 |
 | PC → HA  | `state`        | Zustandsänderungen (Sammelnachricht möglich)         | lebt seit 5.3 |
 | PC → HA  | `event`        | Meldungen an HA (Notification, Aktion)               | lebt seit 5.4 (HA wertet `pc_notification`/`pc_notification_action` aus) |
-| PC → HA  | `call_service` | Service-Aufruf mit Antwort                           | Client sendet seit 5.2, HA antwortet erst ab 5.5 (bis dahin Timeout) |
+| PC → HA  | `call_service` | Service-Aufruf mit Antwort                           | lebt seit 5.2 (Client) / 5.5 (HA antwortet, inkl. Freigabe-Prüfung) |
 | HA → PC  | `command`      | auszuführender Befehl mit Korrelations-Id             | lebt seit 5.4 |
-| PC → HA  | `result`       | Ausgang eines Befehls (`command`) oder `call_service`-Aufrufs | für `command` lebt seit 5.4; für `call_service` antwortet HA erst ab 5.5 |
-| PC → HA  | `subscribe`    | gewünschte HA-Entitäten                              | spezifiziert, noch nicht implementiert (5.5) |
-| HA → PC  | `entity`       | Zustand einer abonnierten HA-Entität                 | spezifiziert, noch nicht implementiert (5.5) |
-| PC → HA  | `catalog`      | verfügbare Entitäten/Services zur Auswahl            | spezifiziert, noch nicht implementiert (5.5) |
-| HA → PC  | `access`       | aktueller Stand der Freigaben                        | spezifiziert, noch nicht implementiert (5.5) |
+| PC → HA  | `result`       | Ausgang eines Befehls (`command`) oder `call_service`-Aufrufs | lebt seit 5.4 (`command`) / 5.5 (`call_service`) |
+| PC → HA  | `subscribe`    | gewünschte HA-Entitäten                              | lebt seit 5.5 |
+| HA → PC  | `entity`       | Zustand einer abonnierten, freigegebenen HA-Entität   | lebt seit 5.5 |
+| PC → HA  | `catalog`      | Anfrage: freigegebene Entitäten/Services zur Auswahl | lebt seit 5.5 |
+| HA → PC  | `catalog`      | Antwort auf obige Anfrage                            | lebt seit 5.5 |
+| HA → PC  | `access`       | aktueller Stand der Freigaben (inkl. Such-Modus)     | lebt seit 5.5 |
 
 ## Payloads
 
@@ -208,7 +209,93 @@ Aufrufer (Entität oder Service) darauf wartet.
 Bei Ablehnung: `"success": false, "error": { "code": "...", "message": "..." }`.
 Dieselbe Form wie beim `command`/`result` oben - eine Nachricht mit `id`, eine
 Antwort mit derselben `id`, in dieser Richtung aber PC-initiiert statt
-HA-initiiert.
+HA-initiiert. Zwei `error.code`-Werte sind hier spezifisch für fehlende
+Freigabe (siehe Abschnitt "Zugriffs-Freigaben" unten): `access_pending`
+(noch keine Entscheidung in HA) und `access_denied` (abgelehnt) - beide
+kommen sofort zurück, kein Timeout nötig, weil die Ablehnung schon feststeht.
+
+## Zugriffs-Freigaben (Step 5.5)
+
+Der PC darf per `subscribe`/`call_service` grundsätzlich um jede fremde
+HA-Entität/jeden Service bitten - was tatsächlich fließt, entscheidet
+ausschließlich HA (Options-Flow der Integration). Drei Zustände:
+`granted`, `requested`, `denied`; kein Eintrag heißt "nie gefragt". Ein
+abgelehnter Eintrag wird nie automatisch erneut angefragt - nur ein
+**Widerruf** (der Eintrag verschwindet ganz, siehe Options-Flow) macht eine
+künftige Anfrage wieder möglich.
+
+### `subscribe` (PC → HA)
+
+```json
+{ "type": "subscribe", "entities": ["sensor.drucker_status", "light.buero"] }
+```
+
+Ersetzt den gesamten Wunsch bei jedem Aufruf (kein Diff, wie `register`) -
+wird bei jedem (Re-)Connect direkt nach `register`/Ist-Stand neu geschickt
+(HAs Verbindungs-Status ist nicht persistiert) und zusätzlich sofort, wenn
+sich die gewünschte Menge zur Laufzeit ändert. Für jede noch nicht
+freigegebene Entität legt HA automatisch eine `requested`-Anfrage an
+(gedeckelt, dedupliziert - siehe unten).
+
+### `entity` (HA → PC)
+
+```json
+{
+  "type": "entity",
+  "entity_id": "sensor.drucker_status",
+  "state": "printing",
+  "attributes": { "friendly_name": "Drucker Status" },
+  "last_updated": 1699999999.0
+}
+```
+
+Eine Nachricht pro geänderter Entität, nur für `read`-Status `granted`. Für
+alles andere bleibt sie schlicht aus - kein Fake-Zustand; der Grund fürs
+Fehlen kommt über `access` (App zeigt "wartet auf Freigabe" statt eines
+stillen Nichts). Ein Widerruf beendet das Abo serverseitig sofort.
+
+### `catalog` (Anfrage PC → HA, Antwort HA → PC)
+
+```json
+{ "type": "catalog", "id": 9 }
+```
+
+```json
+{
+  "type": "catalog", "id": 9,
+  "entities": [{ "entity_id": "sensor.drucker_status", "state": "printing", "attributes": {}, "last_updated": 1699999999.0 }],
+  "services": [{ "domain": "light", "service": "turn_on", "name": "Einschalten", "description": "..." }],
+  "discoverable_entities": [{ "entity_id": "light.buero", "name": "Büro" }],
+  "discoverable_services": [{ "domain": "light", "service": "turn_on", "name": "Einschalten" }]
+}
+```
+
+Ersetzt `GET /api/states`/`GET /api/services` (entfallen ersatzlos).
+`entities`/`services` sind ausschließlich bereits `granted` - das ist die
+Auswahlliste in den App-Einstellungen (`ui/settings/pickers.py`,
+`ui/settings/ha_catalog.py`), keine Möglichkeit, darüber etwas Neues
+anzufragen. `discoverable_entities`/`discoverable_services` sind **name-only**
+(kein `state`, keine Attribute außer dem Namen, keine `description`) und nur
+enthalten, wenn der Nutzer für dieses Gerät im Options-Flow den Such-Modus
+angeschaltet hat (Default aus) - reine Bezeichner zum Wiedererkennen des
+richtigen `entity_id`/`domain.service`, keine Live-Daten. Lesen eines echten
+Zustands bleibt immer an `granted` gebunden.
+
+### `access` (HA → PC)
+
+```json
+{
+  "type": "access",
+  "read": { "sensor.drucker_status": "granted", "light.buero": "requested" },
+  "call": { "light.turn_on": "granted", "switch.turn_on": "denied" },
+  "discovery": false
+}
+```
+
+Immer die volle aktuelle Tabelle dieses Geräts (keine Diffs) - geschickt nach
+jedem verarbeiteten `subscribe`/`call_service` und nach jeder Options-Flow-
+Änderung an einem gerade verbundenen Gerät (Freigaben **und** Such-Modus).
+`discovery` spiegelt den aktuellen Stand des Such-Modus-Schalters.
 
 ## Fehlerbehandlung
 

@@ -10,8 +10,70 @@
   "options": {
     "step": {
       "init": {
+        "title": "HA Computer Control",
+        "menu_options": {
+          "pairing_code": "Generate a new pairing code",
+          "access": "Manage access grants"
+        }
+      },
+      "pairing_code": {
         "title": "Generate a new pairing code",
         "description": "The previous code (if any) becomes invalid. Enter this one in the app:\n\n## {code}"
+      },
+      "access": {
+        "title": "Access grants",
+        "menu_options": {
+          "access_pending": "Review pending requests",
+          "access_granted": "Manage granted access",
+          "access_denied": "Reopen denied requests",
+          "access_grant_read": "Grant read access proactively",
+          "access_grant_call": "Grant a service proactively",
+          "access_discovery": "Search mode"
+        }
+      },
+      "access_pending": {
+        "title": "Pending requests",
+        "description": "This PC asked for these entities/services. Tick to grant or deny - anything left unticked stays pending.",
+        "data": {
+          "grant": "Grant",
+          "deny": "Deny"
+        }
+      },
+      "access_granted": {
+        "title": "Granted access",
+        "description": "Revoke access this PC currently has. Revoking is not the same as denying: a revoked entry can be requested again later, a denied one won't be asked for automatically again.",
+        "data": {
+          "revoke": "Revoke"
+        }
+      },
+      "access_denied": {
+        "title": "Denied requests",
+        "description": "Reopen a denied entry to move it back to pending, so it can be granted.",
+        "data": {
+          "reopen": "Reopen"
+        }
+      },
+      "access_grant_read": {
+        "title": "Grant read access",
+        "description": "Let this PC read these entities before it even asks.",
+        "data": {
+          "entities": "Entities"
+        }
+      },
+      "access_grant_call": {
+        "title": "Grant a service",
+        "description": "Let this PC call a service, optionally restricted to one target entity.",
+        "data": {
+          "service": "Service",
+          "target": "Target entity (optional)"
+        }
+      },
+      "access_discovery": {
+        "title": "Search mode",
+        "description": "When enabled, the app's entity/service picker can also search all of Home Assistant's names (no values, no states) to help find the right id - not just what is already granted. Off by default.",
+        "data": {
+          "enabled": "Search mode enabled"
+        }
       }
     }
   }
