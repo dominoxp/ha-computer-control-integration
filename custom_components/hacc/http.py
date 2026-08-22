@@ -180,6 +180,22 @@ def _first_target_entity_id(target: Any) -> str | None:
     return None
 
 
+def _effective_target(target: Any, service_data: Any) -> dict[str, Any]:
+    """Wie ``target`` und ``service_data`` sich für die Autorisierung *tatsächlich*
+    auswirken - HAs ``ServiceRegistry.async_call`` führt intern
+    ``service_data.update(target)`` aus, sodass jeder Selektor
+    (``entity_id``/``area_id``/``device_id``/``floor_id``/``label_id``), den
+    ``service_data`` trägt und ``target`` nicht überschreibt, unverändert im
+    echten Aufruf landet. Ohne diese Zusammenführung würde
+    :func:`access.is_call_target_allowed` nur ``target`` sehen und ein
+    zusätzlicher Selektor in ``service_data`` (z.B. ``area_id``) die
+    Ziel-Beschränkung einer Freigabe unbemerkt umgehen."""
+    merged: dict[str, Any] = dict(service_data) if isinstance(service_data, dict) else {}
+    if isinstance(target, dict):
+        merged.update(target)
+    return merged
+
+
 async def _handle_call_service(
     hass: HomeAssistant, entry: ConfigEntry, ws: web.WebSocketResponse, payload: dict[str, Any]
 ) -> None:
@@ -197,9 +213,11 @@ async def _handle_call_service(
         return
 
     target = payload.get("target")
-    target_entity = _first_target_entity_id(target)
+    service_data = payload.get("service_data")
+    effective_target = _effective_target(target, service_data)
+    target_entity = _first_target_entity_id(effective_target)
 
-    if not access.is_call_target_allowed(entry, domain, service, target):
+    if not access.is_call_target_allowed(entry, domain, service, effective_target):
         grant = access.call_grants(entry).get(access.call_key(domain, service))
         if grant is not None and grant.status is access.AccessStatus.DENIED:
             await _send_result(
@@ -223,7 +241,6 @@ async def _handle_call_service(
             await conn.async_send_access(hass, entry)
         return
 
-    service_data = payload.get("service_data")
     try:
         await hass.services.async_call(
             domain,

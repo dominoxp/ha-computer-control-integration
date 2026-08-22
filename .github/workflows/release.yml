@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_call:
+    inputs:
+      version:
+        description: "Version ohne fuehrendes v, z.B. 1.2.0 (leer: aus dem Tag ableiten)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - id: resolve
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Integrations-Zip packen
+        # Komfort fuer manuelle Installation - fuer HACS selbst nicht zwingend,
+        # da hacs.json zip_release: false setzt und HACS direkt aus dem
+        # Tag/Branch installiert. Gezippt werden die Ordnerinhalte, nicht der
+        # Ordner selbst, damit sich der Inhalt direkt nach
+        # custom_components/hacc/ entpacken laesst.
+        run: |
+          cd custom_components/hacc
+          zip -r "../../hacc_integration-${{ needs.version.outputs.version }}.zip" .
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          files: hacc_integration-${{ needs.version.outputs.version }}.zip

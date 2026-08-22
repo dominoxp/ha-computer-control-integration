@@ -1,0 +1,48 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    # Anders als lokal (check.cmd delegiert an WSL, siehe check.sh/README) ist
+    # ein GitHub-Runner bereits Linux - kein WSL-Umweg noetig.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Werkzeuge installieren
+        run: |
+          python -m pip install --upgrade pip
+          # Bewusst kein "pip install -e .": ein editable Self-Install dieses
+          # Repos laesst Home Assistants Custom-Component-Scan mit einem
+          # FileNotFoundError abstuerzen, siehe check.sh/README.
+          pip install ruff pytest-homeassistant-custom-component
+
+      - name: ruff format
+        run: ruff format --check .
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: pytest
+        run: pytest -q
+
+  hassfest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration

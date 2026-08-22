@@ -6,7 +6,11 @@ from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.hacc import access
-from custom_components.hacc.const import DOMAIN, MAX_PENDING_ACCESS_REQUESTS
+from custom_components.hacc.const import (
+    DOMAIN,
+    MAX_PENDING_ACCESS_REQUESTS,
+    MAX_PENDING_CALL_TARGETS,
+)
 
 
 def _entry(hass: HomeAssistant) -> MockConfigEntry:
@@ -141,6 +145,21 @@ async def test_request_call_accumulates_targets_while_pending(hass: HomeAssistan
 
     grant = access.call_grants(entry)[access.call_key("light", "turn_on")]
     assert set(grant.targets) == {"light.buero", "light.kueche"}
+
+
+async def test_request_call_targets_are_capped(hass: HomeAssistant) -> None:
+    """Regression: solange eine CallGrant `requested` bleibt, darf eine
+    einzelne pending Anfrage nicht durch viele verschiedene Ziel-Entity-Ids
+    unbegrenzt wachsen - MAX_PENDING_ACCESS_REQUESTS deckelt nur die Anzahl
+    unterschiedlicher Keys, nicht die targets-Liste innerhalb eines Keys."""
+    entry = _entry(hass)
+    for i in range(MAX_PENDING_CALL_TARGETS):
+        access.request_call(hass, entry, "light", "turn_on", f"light.entity_{i}")
+    access.request_call(hass, entry, "light", "turn_on", "light.one_too_many")
+
+    grant = access.call_grants(entry)[access.call_key("light", "turn_on")]
+    assert len(grant.targets) == MAX_PENDING_CALL_TARGETS
+    assert "light.one_too_many" not in grant.targets
 
 
 async def test_discovery_defaults_off_and_can_be_toggled(hass: HomeAssistant) -> None:

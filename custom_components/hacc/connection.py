@@ -396,9 +396,12 @@ def async_apply_event(hass: HomeAssistant, entry: ConfigEntry, payload: dict[str
         _LOGGER.debug("event: unbekannter event_type %r - ignoriert", event_type)
         return
     data = payload.get("data")
-    hass.bus.async_fire(
-        mapped, {"device_id": state.device_id, **(data if isinstance(data, dict) else {})}
-    )
+    event_data = dict(data) if isinstance(data, dict) else {}
+    # device_id kommt zuletzt und gewinnt bewusst - sonst könnte ein Gerät sich
+    # über ein gleichnamiges Feld in `data` als ein anderes gepairtes Gerät
+    # ausgeben (siehe PROTOCOL.md: "mit device_id ergänzt").
+    event_data["device_id"] = state.device_id
+    hass.bus.async_fire(mapped, event_data)
 
 
 # -- Fremde HA-Entitäten lesen (Step 5.5) ------------------------------------

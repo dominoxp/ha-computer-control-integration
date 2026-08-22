@@ -80,6 +80,13 @@ ERROR_ACCESS_DENIED = "access_denied"
 # machen (siehe access.py).
 MAX_PENDING_ACCESS_REQUESTS = 50
 
+# Deckel für die targets-Liste einer einzelnen offenen (requested) CallGrant -
+# ohne ihn könnte ein Gerät durch call_service-Aufrufe mit vielen
+# verschiedenen Ziel-Entity-Ids diese eine Liste unbegrenzt wachsen lassen,
+# obwohl MAX_PENDING_ACCESS_REQUESTS nur unterschiedliche Keys deckelt
+# (siehe access.py).
+MAX_PENDING_CALL_TARGETS = 50
+
 PAIR_PATH = "/api/hacc/pair"
 WS_PATH = "/api/hacc/ws"
 

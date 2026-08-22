@@ -27,7 +27,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import MAX_PENDING_ACCESS_REQUESTS
+from .const import MAX_PENDING_ACCESS_REQUESTS, MAX_PENDING_CALL_TARGETS
 
 OPTIONS_ACCESS = "access"
 OPTIONS_READ = "read"
@@ -207,7 +207,7 @@ def request_call(
     if existing is None and _pending_count(entry) >= MAX_PENDING_ACCESS_REQUESTS:
         return
     targets = list(existing.get("targets") or []) if existing else []
-    if target and target not in targets:
+    if target and target not in targets and len(targets) < MAX_PENDING_CALL_TARGETS:
         targets.append(target)
     call[key] = {
         "status": AccessStatus.REQUESTED.value,

@@ -1,0 +1,48 @@
+name: prepare-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Neue Version, z.B. 1.2.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: bump
+        name: Version in manifest.json anheben
+        run: |
+          set -eu
+          VERSION="${{ inputs.version }}"
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" custom_components/hacc/manifest.json
+          grep -q "\"version\": \"$VERSION\"" custom_components/hacc/manifest.json
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Commit + Tag
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add custom_components/hacc/manifest.json
+          git commit -m "chore: release v${{ steps.bump.outputs.version }}"
+          git tag "v${{ steps.bump.outputs.version }}"
+          git push origin "HEAD:${{ github.ref_name }}"
+          git push origin "v${{ steps.bump.outputs.version }}"
+
+  release:
+    needs: bump
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ needs.bump.outputs.version }}

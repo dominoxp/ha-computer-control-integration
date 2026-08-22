@@ -107,6 +107,32 @@ async def test_pc_notification_action_becomes_hacc_notification_action(
     await ws.close()
 
 
+async def test_device_id_in_event_data_cannot_spoof_the_real_device(
+    hass: HomeAssistant, hass_client_no_auth: ClientSessionGenerator
+) -> None:
+    """Regression: `data.device_id` darf die echte, serverseitig bekannte
+    device_id des sendenden Geräts nicht überschreiben - sonst könnte sich
+    ein gepairtes Gerät in hacc_notification(_action) als ein anderes
+    gepairtes Gerät ausgeben (siehe PROTOCOL.md: "mit device_id ergänzt")."""
+    device_id, device_key, _entry = await _setup_paired_entry(hass)
+    ws = await _connect(hass, hass_client_no_auth, device_id, device_key)
+    events: list[dict[str, Any]] = []
+    hass.bus.async_listen("hacc_notification", lambda event: events.append(event.data))
+
+    await ws.send_json(
+        {
+            "type": "event",
+            "event_type": "pc_notification",
+            "data": {"title": "gefaelscht", "device_id": "anderes-geraet"},
+        }
+    )
+
+    await _wait_for(lambda: bool(events))
+    assert events[0]["device_id"] == device_id
+
+    await ws.close()
+
+
 async def test_an_unknown_event_type_is_ignored(
     hass: HomeAssistant, hass_client_no_auth: ClientSessionGenerator
 ) -> None:
