@@ -117,6 +117,36 @@ def is_call_granted(entry: ConfigEntry, domain: str, service: str, target: str |
     return not grant.targets or target in grant.targets
 
 
+_BROAD_TARGET_SELECTORS = ("area_id", "device_id", "floor_id", "label_id")
+
+
+def is_call_target_allowed(entry: ConfigEntry, domain: str, service: str, target: Any) -> bool:
+    """Ob der komplette ``target``-Payload einer call_service-Nachricht durch die
+    Freigabe gedeckt ist - nicht nur eine einzelne repräsentative Entity-Id.
+
+    Anders als :func:`is_call_granted` (die nur auf eine einzelne Ziel-Entität
+    für die Anfrage-/UI-Logik schaut) prüft das hier *jede* in ``target``
+    genannte Entity-Id gegen ``grant.targets`` und lehnt ``area_id``/
+    ``device_id``/``floor_id``/``label_id``-Selektoren ab, sobald die Freigabe
+    auf bestimmte Ziele beschränkt ist. Ohne das könnte ein Gerät eine Freigabe
+    für eine einzelne Entität durch eine Entity-Id-Liste oder einen zusätzlichen
+    Area-Selektor auf beliebige weitere Ziele ausweiten.
+    """
+    grant = call_grants(entry).get(call_key(domain, service))
+    if grant is None or grant.status is not AccessStatus.GRANTED:
+        return False
+    if not grant.targets:
+        return True
+    if not isinstance(target, dict) or any(key in target for key in _BROAD_TARGET_SELECTORS):
+        return False
+    entity_ids = target.get("entity_id")
+    if isinstance(entity_ids, str):
+        entity_ids = [entity_ids]
+    if not isinstance(entity_ids, list) or not entity_ids:
+        return False
+    return all(entity_id in grant.targets for entity_id in entity_ids)
+
+
 def granted_read_entities(entry: ConfigEntry) -> list[str]:
     return [g.entity_id for g in read_grants(entry).values() if g.status is AccessStatus.GRANTED]
 

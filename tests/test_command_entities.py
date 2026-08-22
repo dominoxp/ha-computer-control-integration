@@ -109,8 +109,12 @@ async def _setup_paired_entry(hass: HomeAssistant) -> tuple[str, str, MockConfig
     return device_id, device_key, entry
 
 
-def _ws_url(device_id: str, device_key: str) -> str:
-    return f"{WS_PATH}?device_id={device_id}&device_key={device_key}"
+def _ws_url(device_id: str) -> str:
+    return f"{WS_PATH}?device_id={device_id}"
+
+
+def _auth_headers(device_key: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {device_key}"}
 
 
 async def _connect_and_register(
@@ -121,7 +125,7 @@ async def _connect_and_register(
     entities: list[dict[str, Any]],
 ) -> Any:
     http_client = await client()
-    ws = await http_client.ws_connect(_ws_url(device_id, device_key))
+    ws = await http_client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key))
     await ws.send_json(
         {
             "type": "hello",

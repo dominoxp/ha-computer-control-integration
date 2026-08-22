@@ -166,6 +166,20 @@ async def _send_result(
     await _send_json(ws, {"type": "result", "id": msg_id, "success": success, "error": error})
 
 
+def _first_target_entity_id(target: Any) -> str | None:
+    """Eine repräsentative Ziel-Entity-Id für Anfrage-/UI-Zwecke - siehe
+    :func:`access.request_call`. Die eigentliche Autorisierung läuft über
+    :func:`access.is_call_target_allowed`, die den ganzen Payload prüft."""
+    if not isinstance(target, dict):
+        return None
+    entity_ids = target.get("entity_id")
+    if isinstance(entity_ids, list):
+        return entity_ids[0] if entity_ids else None
+    if isinstance(entity_ids, str):
+        return entity_ids
+    return None
+
+
 async def _handle_call_service(
     hass: HomeAssistant, entry: ConfigEntry, ws: web.WebSocketResponse, payload: dict[str, Any]
 ) -> None:
@@ -183,11 +197,9 @@ async def _handle_call_service(
         return
 
     target = payload.get("target")
-    target_entity = target.get("entity_id") if isinstance(target, dict) else None
-    if isinstance(target_entity, list):
-        target_entity = target_entity[0] if target_entity else None
+    target_entity = _first_target_entity_id(target)
 
-    if not access.is_call_granted(entry, domain, service, target_entity):
+    if not access.is_call_target_allowed(entry, domain, service, target):
         grant = access.call_grants(entry).get(access.call_key(domain, service))
         if grant is not None and grant.status is access.AccessStatus.DENIED:
             await _send_result(
@@ -281,6 +293,17 @@ async def _handle_catalog(
     await _send_json(ws, result)
 
 
+def _extract_device_key(request: web.Request) -> str | None:
+    """Geräte-Key aus dem ``Authorization``-Header - anders als ein
+    Query-Parameter landet er nicht standardmäßig im Klartext in
+    HTTP-Zugriffs-Logs (HA selbst oder ein vorgeschalteter Reverse-Proxy)."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    key = auth.removeprefix("Bearer ").strip()
+    return key or None
+
+
 class WebSocketView(HomeAssistantView):
     """GET /api/hacc/ws - the persistent, device-key-authenticated connection."""
 
@@ -291,7 +314,7 @@ class WebSocketView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.StreamResponse:
         hass: HomeAssistant = request.app["hass"]
         device_id = request.query.get("device_id")
-        device_key = request.query.get("device_key")
+        device_key = _extract_device_key(request)
         if not device_id or not device_key:
             return web.Response(status=HTTPStatus.UNAUTHORIZED)
 

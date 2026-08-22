@@ -9,8 +9,10 @@ passende Änderung in beiden Repos nach sich.
 
 - Ein Gerät koppelt sich einmalig über `POST /api/hacc/pair` (Kopplungs-Code
   gegen Geräte-Id/Geräte-Key, siehe README) und verbindet sich danach per
-  WebSocket mit `GET /api/hacc/ws?device_id=<id>&device_key=<key>`. Beide
-  Endpunkte sind `requires_auth = False` - die Prüfung übernimmt der
+  WebSocket mit `GET /api/hacc/ws?device_id=<id>`, den Geräte-Key im
+  `Authorization: Bearer <key>`-Header des Upgrade-Requests. Ein Request ohne diesen Header wird mit 401
+  abgelehnt, auch mit einem `device_key`-Query-Parameter.
+  Beide Endpunkte sind `requires_auth = False` - die Prüfung übernimmt der
   Geräte-Key selbst (`hmac.compare_digest` gegen den gespeicherten Hash).
 - Nach dem Upgrade ist jede Nachricht ein JSON-Text-Frame mit einem Feld
   `type`. Anfrage/Antwort-Nachrichten tragen zusätzlich eine vom Client
@@ -27,22 +29,22 @@ passende Änderung in beiden Repos nach sich.
 
 ## Nachrichtenübersicht
 
-| Richtung | Nachricht      | Zweck                                              | Status |
-| -------- | -------------- | --------------------------------------------------- | ------ |
-| PC → HA  | `hello`        | Protokollversion, Gerätename, App- und OS-Version    | lebt seit 5.1 |
-| HA → PC  | `hello_ok`     | Geräte-Id, HA-Version, Protokollversion              | lebt seit 5.1 |
-| HA → PC  | `error`        | Ablehnung mit `code` und `message`                   | lebt seit 5.1 |
-| PC → HA  | `register`     | vollständiges Manifest der eigenen Entitäten         | lebt seit 5.3 |
-| PC → HA  | `state`        | Zustandsänderungen (Sammelnachricht möglich)         | lebt seit 5.3 |
-| PC → HA  | `event`        | Meldungen an HA (Notification, Aktion)               | lebt seit 5.4 (HA wertet `pc_notification`/`pc_notification_action` aus) |
-| PC → HA  | `call_service` | Service-Aufruf mit Antwort                           | lebt seit 5.2 (Client) / 5.5 (HA antwortet, inkl. Freigabe-Prüfung) |
-| HA → PC  | `command`      | auszuführender Befehl mit Korrelations-Id             | lebt seit 5.4 |
-| PC → HA  | `result`       | Ausgang eines Befehls (`command`) oder `call_service`-Aufrufs | lebt seit 5.4 (`command`) / 5.5 (`call_service`) |
-| PC → HA  | `subscribe`    | gewünschte HA-Entitäten                              | lebt seit 5.5 |
-| HA → PC  | `entity`       | Zustand einer abonnierten, freigegebenen HA-Entität   | lebt seit 5.5 |
-| PC → HA  | `catalog`      | Anfrage: freigegebene Entitäten/Services zur Auswahl | lebt seit 5.5 |
-| HA → PC  | `catalog`      | Antwort auf obige Anfrage                            | lebt seit 5.5 |
-| HA → PC  | `access`       | aktueller Stand der Freigaben (inkl. Such-Modus)     | lebt seit 5.5 |
+| Richtung | Nachricht      | Zweck                                                         | Status                                                                   |
+| -------- | -------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| PC → HA  | `hello`        | Protokollversion, Gerätename, App- und OS-Version             | lebt seit 5.1                                                            |
+| HA → PC  | `hello_ok`     | Geräte-Id, HA-Version, Protokollversion                       | lebt seit 5.1                                                            |
+| HA → PC  | `error`        | Ablehnung mit `code` und `message`                            | lebt seit 5.1                                                            |
+| PC → HA  | `register`     | vollständiges Manifest der eigenen Entitäten                  | lebt seit 5.3                                                            |
+| PC → HA  | `state`        | Zustandsänderungen (Sammelnachricht möglich)                  | lebt seit 5.3                                                            |
+| PC → HA  | `event`        | Meldungen an HA (Notification, Aktion)                        | lebt seit 5.4 (HA wertet `pc_notification`/`pc_notification_action` aus) |
+| PC → HA  | `call_service` | Service-Aufruf mit Antwort                                    | lebt seit 5.2 (Client) / 5.5 (HA antwortet, inkl. Freigabe-Prüfung)      |
+| HA → PC  | `command`      | auszuführender Befehl mit Korrelations-Id                     | lebt seit 5.4                                                            |
+| PC → HA  | `result`       | Ausgang eines Befehls (`command`) oder `call_service`-Aufrufs | lebt seit 5.4 (`command`) / 5.5 (`call_service`)                         |
+| PC → HA  | `subscribe`    | gewünschte HA-Entitäten                                       | lebt seit 5.5                                                            |
+| HA → PC  | `entity`       | Zustand einer abonnierten, freigegebenen HA-Entität           | lebt seit 5.5                                                            |
+| PC → HA  | `catalog`      | Anfrage: freigegebene Entitäten/Services zur Auswahl          | lebt seit 5.5                                                            |
+| HA → PC  | `catalog`      | Antwort auf obige Anfrage                                     | lebt seit 5.5                                                            |
+| HA → PC  | `access`       | aktueller Stand der Freigaben (inkl. Such-Modus)              | lebt seit 5.5                                                            |
 
 ## Payloads
 
@@ -64,13 +66,23 @@ dieser frischen Verbindung.
 ### `hello_ok` (HA → PC)
 
 ```json
-{ "type": "hello_ok", "protocol_version": 2, "ha_version": "2024.7.0", "device_id": "a1b2…" }
+{
+  "type": "hello_ok",
+  "protocol_version": 2,
+  "ha_version": "2024.7.0",
+  "device_id": "a1b2…"
+}
 ```
 
 ### `error` (HA → PC)
 
 ```json
-{ "type": "error", "id": null, "code": "protocol_version_mismatch", "message": "HA erwartet Protokollversion 2." }
+{
+  "type": "error",
+  "id": null,
+  "code": "protocol_version_mismatch",
+  "message": "HA erwartet Protokollversion 2."
+}
 ```
 
 `id` ist `null`, solange der Fehler die `hello`-Nachricht selbst betrifft
@@ -152,9 +164,7 @@ echte Laufzeitwerte (z.B. `pid` einer laufenden App), keine der Basisfelder aus
 ```json
 {
   "type": "state",
-  "states": [
-    { "key": "heartbeat", "state": "ok", "attributes": {} }
-  ]
+  "states": [{ "key": "heartbeat", "state": "ok", "attributes": {} }]
 }
 ```
 
@@ -166,7 +176,11 @@ gespeicherte Monitor-Profile zur Laufzeit ändern.
 ### `event` (PC → HA)
 
 ```json
-{ "type": "event", "event_type": "pc_notification", "data": { "title": "Download fertig" } }
+{
+  "type": "event",
+  "event_type": "pc_notification",
+  "data": { "title": "Download fertig" }
+}
 ```
 
 HA übersetzt bekannte `event_type`-Werte 1:1 in eigene Events auf `hass.bus`,
@@ -182,7 +196,12 @@ gedrückt, `select`/`number`/`switch` geändert) oder durch einen der
 zweckgebundenen Services (`hacc.notify`, `hacc.launch`, `hacc.set_displays`).
 
 ```json
-{ "type": "command", "id": 12, "command": "set_volume", "data": { "direction": "output", "level": 30 } }
+{
+  "type": "command",
+  "id": 12,
+  "command": "set_volume",
+  "data": { "direction": "output", "level": 30 }
+}
 ```
 
 ```json
@@ -199,7 +218,14 @@ Aufrufer (Entität oder Service) darauf wartet.
 ### `call_service` (PC → HA) / `result` (HA → PC)
 
 ```json
-{ "type": "call_service", "id": 7, "domain": "switch", "service": "turn_on", "service_data": { "brightness_pct": 60 }, "target": { "entity_id": "light.buero" } }
+{
+  "type": "call_service",
+  "id": 7,
+  "domain": "switch",
+  "service": "turn_on",
+  "service_data": { "brightness_pct": 60 },
+  "target": { "entity_id": "light.buero" }
+}
 ```
 
 ```json
@@ -262,11 +288,28 @@ stillen Nichts). Ein Widerruf beendet das Abo serverseitig sofort.
 
 ```json
 {
-  "type": "catalog", "id": 9,
-  "entities": [{ "entity_id": "sensor.drucker_status", "state": "printing", "attributes": {}, "last_updated": 1699999999.0 }],
-  "services": [{ "domain": "light", "service": "turn_on", "name": "Einschalten", "description": "..." }],
+  "type": "catalog",
+  "id": 9,
+  "entities": [
+    {
+      "entity_id": "sensor.drucker_status",
+      "state": "printing",
+      "attributes": {},
+      "last_updated": 1699999999.0
+    }
+  ],
+  "services": [
+    {
+      "domain": "light",
+      "service": "turn_on",
+      "name": "Einschalten",
+      "description": "..."
+    }
+  ],
   "discoverable_entities": [{ "entity_id": "light.buero", "name": "Büro" }],
-  "discoverable_services": [{ "domain": "light", "service": "turn_on", "name": "Einschalten" }]
+  "discoverable_services": [
+    { "domain": "light", "service": "turn_on", "name": "Einschalten" }
+  ]
 }
 ```
 

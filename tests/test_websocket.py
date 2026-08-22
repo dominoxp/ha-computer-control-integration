@@ -39,8 +39,15 @@ async def _setup_paired_entry(hass: HomeAssistant) -> tuple[str, str, MockConfig
     return device_id, device_key, entry
 
 
-def _ws_url(device_id: str, device_key: str) -> str:
-    return f"{WS_PATH}?device_id={device_id}&device_key={device_key}"
+def _ws_url(device_id: str) -> str:
+    return f"{WS_PATH}?device_id={device_id}"
+
+
+def _auth_headers(device_key: str) -> dict[str, str]:
+    """Der Geräte-Key gehört in den Authorization-Header, nicht in die URL -
+    Query-Strings landen sonst typischerweise im Klartext in
+    HTTP-Zugriffs-Logs (siehe http.py, ``_extract_device_key``)."""
+    return {"Authorization": f"Bearer {device_key}"}
 
 
 async def test_handshake_succeeds_with_valid_key(
@@ -49,7 +56,7 @@ async def test_handshake_succeeds_with_valid_key(
     device_id, device_key, _entry = await _setup_paired_entry(hass)
     client = await hass_client_no_auth()
 
-    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+    async with client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key)) as ws:
         await ws.send_json(
             {
                 "type": "hello",
@@ -70,7 +77,7 @@ async def test_connection_refused_with_wrong_key(
     device_id, _device_key, entry = await _setup_paired_entry(hass)
     client = await hass_client_no_auth()
 
-    resp = await client.get(_ws_url(device_id, "not-the-right-key"))
+    resp = await client.get(_ws_url(device_id), headers=_auth_headers("not-the-right-key"))
     assert resp.status == 401
     # Seit Step 5.3 legt schon das Plattform-Setup (sensor/binary_sensor) einen
     # leeren ConnectionState pro ConfigEntry an - "kein Key im Dict" ist deshalb
@@ -87,7 +94,7 @@ async def test_connection_refused_without_key(
     device_id, _device_key, _entry = await _setup_paired_entry(hass)
     client = await hass_client_no_auth()
 
-    resp = await client.get(f"{WS_PATH}?device_id={device_id}")
+    resp = await client.get(_ws_url(device_id))
     assert resp.status == 401
 
 
@@ -97,7 +104,7 @@ async def test_protocol_version_mismatch_is_rejected(
     device_id, device_key, _entry = await _setup_paired_entry(hass)
     client = await hass_client_no_auth()
 
-    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+    async with client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key)) as ws:
         await ws.send_json({"type": "hello", "protocol_version": PROTOCOL_VERSION + 1})
         msg = await ws.receive_json()
         assert msg["type"] == "error"
@@ -110,13 +117,13 @@ async def test_second_connection_replaces_first(
     device_id, device_key, _entry = await _setup_paired_entry(hass)
     client = await hass_client_no_auth()
 
-    ws1 = await client.ws_connect(_ws_url(device_id, device_key))
+    ws1 = await client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key))
     await ws1.send_json(
         {"type": "hello", "protocol_version": PROTOCOL_VERSION, "device_name": "PC"}
     )
     await ws1.receive_json()
 
-    ws2 = await client.ws_connect(_ws_url(device_id, device_key))
+    ws2 = await client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key))
     await ws2.send_json(
         {"type": "hello", "protocol_version": PROTOCOL_VERSION, "device_name": "PC"}
     )
@@ -146,7 +153,7 @@ async def test_subscribe_to_granted_entity_receives_state(
     access.grant_read(hass, entry, ["sensor.drucker_status"])
     client = await hass_client_no_auth()
 
-    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+    async with client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key)) as ws:
         await _hello(ws)
         await ws.send_json({"type": "subscribe", "entities": ["sensor.drucker_status"]})
 
@@ -168,7 +175,7 @@ async def test_subscribe_to_ungranted_entity_creates_request(
     device_id, device_key, entry = await _setup_paired_entry(hass)
     client = await hass_client_no_auth()
 
-    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+    async with client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key)) as ws:
         await _hello(ws)
         await ws.send_json({"type": "subscribe", "entities": ["light.buero"]})
 
@@ -187,7 +194,7 @@ async def test_live_state_changes_are_pushed(
     access.grant_read(hass, entry, ["sensor.drucker_status"])
     client = await hass_client_no_auth()
 
-    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+    async with client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key)) as ws:
         await _hello(ws)
         await ws.send_json({"type": "subscribe", "entities": ["sensor.drucker_status"]})
         await ws.receive_json()
@@ -207,7 +214,7 @@ async def test_revoking_access_stops_live_updates_immediately(
     access.grant_read(hass, entry, ["sensor.drucker_status"])
     client = await hass_client_no_auth()
 
-    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+    async with client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key)) as ws:
         await _hello(ws)
         await ws.send_json({"type": "subscribe", "entities": ["sensor.drucker_status"]})
         await ws.receive_json()

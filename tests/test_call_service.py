@@ -36,8 +36,12 @@ async def _setup_paired_entry(hass: HomeAssistant) -> tuple[str, str, MockConfig
     return device_id, device_key, entry
 
 
-def _ws_url(device_id: str, device_key: str) -> str:
-    return f"{WS_PATH}?device_id={device_id}&device_key={device_key}"
+def _ws_url(device_id: str) -> str:
+    return f"{WS_PATH}?device_id={device_id}"
+
+
+def _auth_headers(device_key: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {device_key}"}
 
 
 async def _hello(ws: Any) -> None:
@@ -64,7 +68,7 @@ async def test_granted_call_executes_the_real_service(
     hass.services.async_register("test", "do_it", _recorder(calls))
     client = await hass_client_no_auth()
 
-    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+    async with client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key)) as ws:
         await _hello(ws)
         await ws.send_json(
             {
@@ -89,7 +93,7 @@ async def test_ungranted_call_is_rejected_without_calling_the_service(
     hass.services.async_register("test", "do_it", lambda call: calls.append(call))
     client = await hass_client_no_auth()
 
-    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+    async with client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key)) as ws:
         await _hello(ws)
         await ws.send_json({"type": "call_service", "id": 2, "domain": "test", "service": "do_it"})
         result = await ws.receive_json()
@@ -109,7 +113,7 @@ async def test_denied_call_is_rejected_and_does_not_re_request(
     first_timestamp = access.call_grants(entry)["test.do_it"].requested_at
     client = await hass_client_no_auth()
 
-    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+    async with client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key)) as ws:
         await _hello(ws)
         await ws.send_json({"type": "call_service", "id": 3, "domain": "test", "service": "do_it"})
         result = await ws.receive_json()
@@ -129,7 +133,7 @@ async def test_call_restricted_to_a_different_target_is_rejected(
     hass.services.async_register("test", "do_it", lambda call: calls.append(call))
     client = await hass_client_no_auth()
 
-    async with client.ws_connect(_ws_url(device_id, device_key)) as ws:
+    async with client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key)) as ws:
         await _hello(ws)
         await ws.send_json(
             {
@@ -147,3 +151,62 @@ async def test_call_restricted_to_a_different_target_is_rejected(
     assert calls == []
     # Kein neuer Antrag - der Service ist ja schon (für ein anderes Ziel) freigegeben.
     assert access.call_grants(entry)["test.do_it"].status is access.AccessStatus.GRANTED
+
+
+async def test_call_restricted_to_a_target_rejects_extra_entities_in_a_list(
+    hass: HomeAssistant, hass_client_no_auth: ClientSessionGenerator
+) -> None:
+    """Regression: eine Freigabe für ein Ziel darf nicht durch eine Entity-Id-
+    Liste, die das erlaubte Ziel nur als erstes Element enthält, auf weitere
+    Entitäten ausgeweitet werden können."""
+    device_id, device_key, entry = await _setup_paired_entry(hass)
+    access.grant_call(hass, entry, "test", "do_it", ["light.buero"])
+    calls: list[Any] = []
+    hass.services.async_register("test", "do_it", lambda call: calls.append(call))
+    client = await hass_client_no_auth()
+
+    async with client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key)) as ws:
+        await _hello(ws)
+        await ws.send_json(
+            {
+                "type": "call_service",
+                "id": 5,
+                "domain": "test",
+                "service": "do_it",
+                "target": {"entity_id": ["light.buero", "light.schlafzimmer"]},
+            }
+        )
+        result = await ws.receive_json()
+
+    assert result["success"] is False
+    assert result["error"]["code"] == "access_denied"
+    assert calls == []
+
+
+async def test_call_restricted_to_a_target_rejects_an_area_selector(
+    hass: HomeAssistant, hass_client_no_auth: ClientSessionGenerator
+) -> None:
+    """Regression: ein zusätzlicher area_id-Selektor neben der erlaubten
+    entity_id darf die Freigabe nicht auf eine ganze Area ausweiten."""
+    device_id, device_key, entry = await _setup_paired_entry(hass)
+    access.grant_call(hass, entry, "test", "do_it", ["light.buero"])
+    calls: list[Any] = []
+    hass.services.async_register("test", "do_it", lambda call: calls.append(call))
+    client = await hass_client_no_auth()
+
+    async with client.ws_connect(_ws_url(device_id), headers=_auth_headers(device_key)) as ws:
+        await _hello(ws)
+        await ws.send_json(
+            {
+                "type": "call_service",
+                "id": 6,
+                "domain": "test",
+                "service": "do_it",
+                "target": {"entity_id": "light.buero", "area_id": "wohnzimmer"},
+            }
+        )
+        result = await ws.receive_json()
+
+    assert result["success"] is False
+    assert result["error"]["code"] == "access_denied"
+    assert calls == []

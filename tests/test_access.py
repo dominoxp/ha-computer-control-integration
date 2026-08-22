@@ -89,6 +89,51 @@ async def test_call_access_unrestricted_when_no_targets(hass: HomeAssistant) -> 
     assert access.is_call_granted(entry, "light", "turn_on", None)
 
 
+async def test_call_target_allowed_respects_target_restriction(hass: HomeAssistant) -> None:
+    entry = _entry(hass)
+    access.grant_call(hass, entry, "light", "turn_on", ["light.buero"])
+
+    assert access.is_call_target_allowed(entry, "light", "turn_on", {"entity_id": "light.buero"})
+    assert not access.is_call_target_allowed(
+        entry, "light", "turn_on", {"entity_id": "light.kueche"}
+    )
+    assert not access.is_call_target_allowed(entry, "light", "turn_on", None)
+
+
+async def test_call_target_allowed_rejects_extra_entities_in_a_list(hass: HomeAssistant) -> None:
+    """Eine Freigabe für eine Entität darf nicht durch eine Liste auf weitere
+    Ziele ausgeweitet werden können, nur weil das freigegebene Ziel auch
+    darin vorkommt."""
+    entry = _entry(hass)
+    access.grant_call(hass, entry, "light", "turn_on", ["light.buero"])
+
+    assert not access.is_call_target_allowed(
+        entry, "light", "turn_on", {"entity_id": ["light.buero", "light.kueche"]}
+    )
+
+
+async def test_call_target_allowed_rejects_broad_selectors_when_restricted(
+    hass: HomeAssistant,
+) -> None:
+    """area_id/device_id/floor_id können auf beliebig viele Entitäten expandieren -
+    bei einer auf bestimmte Ziele beschränkten Freigabe sind sie deshalb tabu,
+    selbst wenn zusätzlich eine erlaubte entity_id im selben Target steht."""
+    entry = _entry(hass)
+    access.grant_call(hass, entry, "light", "turn_on", ["light.buero"])
+
+    assert not access.is_call_target_allowed(
+        entry, "light", "turn_on", {"entity_id": "light.buero", "area_id": "wohnzimmer"}
+    )
+
+
+async def test_call_target_allowed_unrestricted_when_no_targets(hass: HomeAssistant) -> None:
+    entry = _entry(hass)
+    access.grant_call(hass, entry, "light", "turn_on", [])
+
+    assert access.is_call_target_allowed(entry, "light", "turn_on", {"area_id": "wohnzimmer"})
+    assert access.is_call_target_allowed(entry, "light", "turn_on", None)
+
+
 async def test_request_call_accumulates_targets_while_pending(hass: HomeAssistant) -> None:
     entry = _entry(hass)
     access.request_call(hass, entry, "light", "turn_on", "light.buero")

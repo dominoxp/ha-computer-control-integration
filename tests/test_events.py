@@ -49,7 +49,9 @@ async def _connect(
     hass: HomeAssistant, client: ClientSessionGenerator, device_id: str, device_key: str
 ) -> Any:
     http_client = await client()
-    ws = await http_client.ws_connect(f"{WS_PATH}?device_id={device_id}&device_key={device_key}")
+    ws = await http_client.ws_connect(
+        f"{WS_PATH}?device_id={device_id}", headers={"Authorization": f"Bearer {device_key}"}
+    )
     await ws.send_json(
         {
             "type": "hello",
