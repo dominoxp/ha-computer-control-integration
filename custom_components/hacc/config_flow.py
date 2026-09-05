@@ -61,8 +61,9 @@ def _service_id(value: Any) -> str:
 class HaccOptionsFlow(config_entries.OptionsFlow):
     """Kopplungs-Code neu erzeugen oder Zugriffs-Freigaben verwalten."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
+    def __init__(self) -> None:
+        # ``config_entry`` nicht selbst setzen - seit HA 2024.11 ist es eine
+        # Nur-Lese-Property, die der Flow-Manager selbst füllt.
         self._new_code: str | None = None
         self._new_entry_data: dict[str, str] | None = None
 
@@ -263,4 +264,4 @@ class HaccConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> HaccOptionsFlow:
-        return HaccOptionsFlow(config_entry)
+        return HaccOptionsFlow()

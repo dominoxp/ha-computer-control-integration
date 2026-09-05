@@ -33,7 +33,7 @@ notify:
         text:
     actions:
       name: Aktionsknöpfe
-      description: Liste von Aktionsknöpfen, z.B. [{"action": "confirm", "title": "Ja"}].
+      description: 'Liste von Aktionsknöpfen, z.B. [{"action": "confirm", "title": "Ja"}].'
       advanced: true
       selector:
         object:
