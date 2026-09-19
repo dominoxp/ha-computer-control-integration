@@ -21,6 +21,10 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# Bare "pytest" (CI) legt das Repo-Root nicht auf den sys.path, anders als
+# "python -m pytest" (check.sh) - ohne das findet der Import custom_components nicht.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
