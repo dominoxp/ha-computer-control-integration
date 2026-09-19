@@ -1,7 +1,6 @@
 {
   "name": "HA Computer Control",
   "render_readme": true,
-  "domains": ["hacc"],
-  "homeassistant": "2024.6.0",
+  "homeassistant": "2026.9.0",
   "zip_release": false
 }
