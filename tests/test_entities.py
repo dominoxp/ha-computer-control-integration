@@ -186,6 +186,37 @@ async def test_state_message_updates_entity(
     await ws.close()
 
 
+async def test_timestamp_sensor_survives_connection_signal(
+    hass: HomeAssistant, hass_client_no_auth: ClientSessionGenerator
+) -> None:
+    """Ein timestamp-Sensor bekommt seinen Wert als String vom Draht; HA verlangt ein
+    datetime und warf beim Schreiben des Zustands (auch im Verbindungs-Signal) einen
+    ValueError."""
+    uptime_entity = {**CPU_ENTITY, "key": "uptime", "unit": None, "device_class": "timestamp"}
+    uptime_entity["state_class"] = None
+    device_id, device_key, entry = await _setup_paired_entry(hass)
+    ws = await _connect_and_register(
+        hass, hass_client_no_auth, device_id, device_key, [uptime_entity]
+    )
+    await _wait_for(lambda: _entity_id(hass, "sensor", device_id, "uptime") is not None)
+    entity_id = _entity_id(hass, "sensor", device_id, "uptime")
+
+    await ws.send_json(
+        {
+            "type": "state",
+            "states": [
+                {"key": "uptime", "state": "2026-09-10T21:24:25.592697+00:00", "attributes": {}}
+            ],
+        }
+    )
+    await _wait_for(lambda: hass.states.get(entity_id).state == "2026-09-10T21:24:25+00:00")
+
+    conn.clear_connection(hass, entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == STATE_UNAVAILABLE
+    await ws.close()
+
+
 async def test_availability_follows_connection(
     hass: HomeAssistant, hass_client_no_auth: ClientSessionGenerator
 ) -> None:
